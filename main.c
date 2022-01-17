@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <sys/wait.h>
@@ -10,24 +11,42 @@
 
 void printPrompt();
 void executeCommand();
+void changeDirectory();
 
 int main() {
-	char holdPrompt[1024];
-	printPrompt(holdPrompt);
-	char* userInput = readline(holdPrompt);
+	while(1) {	
+		char holdPrompt[1024];
+		printPrompt(holdPrompt);
+		char* userInput = readline(holdPrompt);
 
-	char* args = strtok(userInput, " ");
-	char* tokens[128];
+		char* args = strtok(userInput, " ");
+		char* tokens[128];
 
-	int i = 0;
-	while (args) {
-		tokens[i++] = args;
-		args = strtok(NULL, " ");
+		int i = 0;
+		while (args) {
+			tokens[i++] = args;
+			args = strtok(NULL, " ");
+		}
+		tokens[i] = NULL;
+		if (!strcmp(tokens[0], "cd")) {
+			changeDirectory(tokens);
+		}
+		executeCommand(tokens);
 	}
-	tokens[i] = NULL;
-	executeCommand(tokens);
-	return 0;
+return 0;
 }
+
+
+void changeDirectory(char** path) {
+	if (path[1] == NULL || !strcmp(path[1], "~")) {
+		chdir(getenv("HOME"));
+	} else if (!strcmp(path[1], "..")) {
+		chdir("../");
+	} else {
+		chdir(path[1]);
+	}
+}
+
 
 /* 
  * Purpose:    	display the prompt.
@@ -37,11 +56,11 @@ int main() {
 void printPrompt(char* holdPrompt) {
 	holdPrompt[0] = '\0';
 
-	char hostname[1024];
+	char hostname[256];
 	gethostname(hostname, sizeof(hostname));
 
 	
-	char curr_dir[1024];
+	char curr_dir[256];
 	getcwd(curr_dir, sizeof(curr_dir));
 
 	strcat(holdPrompt, getlogin());
