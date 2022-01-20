@@ -12,37 +12,44 @@
 void printPrompt();
 void executeCommand();
 void changeDirectory();
+int tokenize();
 
 int main() {
-	while(1) {	
+	while(1) {
 		char holdPrompt[1024];
 		printPrompt(holdPrompt);
-		char* userInput = readline(holdPrompt);
-
-		char* args = strtok(userInput, " ");
 		char* tokens[128];
-
-		int i = 0;
-		while (args) {
-			tokens[i++] = args;
-			args = strtok(NULL, " ");
-		}
-		tokens[i] = NULL;
+		int i = tokenize(tokens, readline(holdPrompt));
 		if (!strcmp(tokens[0], "cd")) {
-			changeDirectory(tokens);
+			changeDirectory(tokens, i);
 		}
 		executeCommand(tokens);
 	}
-return 0;
+	return 0;
 }
 
+int tokenize(char** tokens, char* userInput) {
+	char* args = strtok(userInput, " ");
+	int i = 0;
+	while (args) {
+		tokens[i++] = args;
+		args = strtok(NULL, " ");
+	}
+	tokens[i] = NULL;
+	return i;
+}
 
-void changeDirectory(char** path) {
-	if (path[1] == NULL || !strcmp(path[1], "~")) {
+void changeDirectory(char** path, int num) {
+	//int num = sizeof(&path);
+	//printf("%d", num);
+	if (path[1] == NULL || strcmp(path[1], "~") == 0) {
 		chdir(getenv("HOME"));
 	} else if (!strcmp(path[1], "..")) {
 		chdir("../");
-	} else {
+	} else if (num > 2) {
+		perror("chdir");
+	}
+       	else {
 		chdir(path[1]);
 	}
 }
@@ -77,10 +84,5 @@ void printPrompt(char* holdPrompt) {
  */
 void executeCommand(char** commands) {
 	pid_t pid = fork();
-	
-	if (pid == 0) {
-		execvp(commands[0], commands);
-	} else {
-		waitpid(pid, NULL, 0);
-	}
+	pid == 0 ? execvp(commands[0], commands) : waitpid(pid, NULL, 0);
 }
