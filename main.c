@@ -12,23 +12,33 @@
 void printPrompt();
 void executeCommand();
 void changeDirectory();
-int tokenize();
+void tokenize();
+int countArgs();
 
 int main() {
 	while(1) {
 		char holdPrompt[1024];
 		printPrompt(holdPrompt);
 		char* tokens[128];
-		int i = tokenize(tokens, readline(holdPrompt));
+		tokenize(tokens, readline(holdPrompt));
 		if (!strcmp(tokens[0], "cd")) {
-			changeDirectory(tokens, i);
+			changeDirectory(tokens);
 		}
 		executeCommand(tokens);
 	}
 	return 0;
 }
 
-int tokenize(char** tokens, char* userInput) {
+int countArgs(char** tokens) {
+	int i = 0;
+	while (tokens[i] != NULL){
+		tokens[i++];
+	}
+	printf("%d", i);
+	return i;
+}
+
+void tokenize(char** tokens, char* userInput) {
 	char* args = strtok(userInput, " ");
 	int i = 0;
 	while (args) {
@@ -36,17 +46,14 @@ int tokenize(char** tokens, char* userInput) {
 		args = strtok(NULL, " ");
 	}
 	tokens[i] = NULL;
-	return i;
 }
 
-void changeDirectory(char** path, int num) {
-	//int num = sizeof(&path);
-	//printf("%d", num);
+void changeDirectory(char** path) {
 	if (path[1] == NULL || strcmp(path[1], "~") == 0) {
 		chdir(getenv("HOME"));
 	} else if (!strcmp(path[1], "..")) {
 		chdir("../");
-	} else if (num > 2) {
+	} else if (countArgs(path) > 2) {
 		perror("chdir");
 	}
        	else {
