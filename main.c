@@ -15,6 +15,8 @@ void tokenize();
 int countArgs();
 void addBackground();
 void add();
+void listNodes();
+void checkProcesses();
 
 
 int main() {
@@ -22,11 +24,16 @@ int main() {
 		char holdPrompt[1024];
 		printPrompt(holdPrompt);
 		char* tokens[128];
+
+		checkProcesses();
+
 		tokenize(tokens, readline(holdPrompt));
 		if (!strcmp(tokens[0], "cd")) {
 			changeDirectory(tokens);
 		} else if (!strcmp(tokens[0], "bg")) {
 			addBackground(tokens);
+		} else if (!strcmp(tokens[0], "bglist")) {
+			listNodes();
 		} else if (!strcmp (tokens[0], "exit")) {
 			exit(1);
 		}
@@ -44,6 +51,45 @@ typedef struct Node {
 } node;
 
 node* head = NULL;
+
+
+void delete(pid_t pid) {
+	node* temp = head;
+
+	if (head -> pid == pid) {
+		printf("%d: %s has terminated.\n", temp -> pid, temp -> command);
+		head = head -> next;
+	} else {
+		while (temp -> next -> pid != pid) {
+			temp = temp -> next;
+		}
+		printf("%d: %s has terminated.\n", temp -> next -> pid, temp -> next -> command);
+		temp -> next = temp -> next -> next;
+		free(temp -> next);
+	}
+	listLength--;
+}
+
+void checkProcesses() {
+	if (listLength > 0) {
+		pid_t pid = waitpid(0, NULL, WNOHANG);
+
+		while (pid > 0) {
+			delete(pid);
+			pid = waitpid(0, NULL, WNOHANG);
+		}
+	}
+}
+
+void listNodes() {
+	node* temp = head;
+
+	while (temp != NULL) {
+		printf("%d: %s\n", temp -> pid, temp -> command);
+		temp = temp -> next;
+	}
+	printf("Total Background Jobs: %d\n", listLength);
+}	
 
 void addBackground(char** commands) {
 	pid_t pid = fork();
