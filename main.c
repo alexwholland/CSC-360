@@ -19,6 +19,7 @@ void listNodes();
 void checkChildTermination();
 void runCommands();
 
+
 int main() {
 	while(1) {
 		char holdPrompt[1024];
@@ -27,13 +28,13 @@ int main() {
 
 		checkChildTermination();
 
+
 		tokenize(tokens, readline(holdPrompt));
 		runCommands(tokens);
 	}
 	return 0;
 }
 
-int listLength = 0;
 
 typedef struct Node {
 	pid_t pid;
@@ -45,14 +46,13 @@ node* head = NULL;
 
 
 void runCommands(char** tokens) {
-//	int* listLength = 0;
-	if (!strcmp(tokens[0], "cd")) {
+	if (strcmp(tokens[0], "cd") == 0) {
 		changeDirectory(tokens);
-	}else if (!strcmp(tokens[0], "bg")) {
+	}else if (strcmp(tokens[0], "bg") == 0) {
 		add(tokens);
-	}else if (!strcmp(tokens[0], "bglist")) {
+	}else if (strcmp(tokens[0], "bglist") == 0) {
 		listNodes();
-	}else if (!strcmp(tokens[0], "exit")) {
+	}else if (strcmp(tokens[0], "exit") == 0) {
 		exit(1);
 	}else{
 		executeCommand(tokens);
@@ -60,6 +60,19 @@ void runCommands(char** tokens) {
 }
 
 /*---------- Helper Functions----------*/
+
+
+void freeList();
+
+int determineListLength() {
+	node* front = head;
+	int count = 0;
+	while (front != NULL) {
+		front = front -> next;
+		count++;
+	}	
+	return count;
+}
 
 int countArgs(char** tokens) {
 	int i = 0;;
@@ -79,15 +92,6 @@ void tokenize(char** tokens, char* userInput) {
 	tokens[i] = NULL;
 }
 
-int determineListLength() {
-	int i = 0;
-	node* temp = head;
-	while (temp != NULL) {
-		temp = temp -> next;
-		i++;
-	}
-	return i;
-}
 
 /*----------Part 1----------*/
 
@@ -151,7 +155,7 @@ void executeCommand(char** commands) {
  */
 
 void checkChildTermination() {
-	if (listLength > 0) {
+	if (determineListLength() > 0) {
 		pid_t pid = waitpid(0, NULL, WNOHANG);
 
 		while (pid > 0) {
@@ -168,7 +172,6 @@ void checkChildTermination() {
 				temp -> next = temp -> next -> next;
 				free(temp -> next);
 			}
-			listLength--;
 			pid = waitpid(0, NULL, WNOHANG);
 		}
 	}
@@ -186,21 +189,17 @@ void listNodes() {
 
 void add(char** command) {
 	pid_t pid = fork();
-	if (pid == 0) {
+	if (!pid) {
 		execvp(command[1], command + 1);
 	} else {
 		node* newNode = (node*)malloc(sizeof(node));
 		newNode -> pid = pid;
 		newNode -> command[0] = '\0';
-		int i = 1;
-
-		while (command[i] != NULL) {
+		for (int i = 1; command[i] != NULL; i++) {
 			strcat(newNode -> command, command[i]);
 			strcat(newNode -> command, " ");
-			i++;
 		}
 		newNode -> next = head;
 		head = newNode;
-		listLength++;
 	}
 }
