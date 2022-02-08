@@ -204,5 +204,3 @@ void add(char** command) {
 		listLength++;
 	}
 }
-
-
