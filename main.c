@@ -2,11 +2,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <readline/readline.h>
 #include <readline/history.h>
-
 
 /*Function Prototypes*/
 void displayPrompt();
@@ -15,7 +15,7 @@ void changeDirectory();
 void tokenize();
 int countArgs();
 void addBackground();
-void add();
+void createProcess();
 void listNodes();
 void checkChildTermination();
 void runCommands();
@@ -29,14 +29,13 @@ int main() {
 		char* tokens[256];
 		char* user_input = readline(holdPrompt);
 
+		/*Create a new prompt line if the user presses `Enter`*/
 		if(countArgs(user_input) < 1) {
 			free(user_input);
 			continue;
 		}
 
 		checkChildTermination();
-
-
 		tokenize(tokens, user_input);
 		runCommands(tokens);
 		free(user_input);
@@ -54,6 +53,7 @@ typedef struct Node {
 	struct Node* next;
 } node;
 
+/*Keep track of the head of the linked list*/
 node* head = NULL;
 
 /* Purpose: 	Execute the various supported commands that the user can run.
@@ -61,19 +61,12 @@ node* head = NULL;
  * Returns:	void
  */
 void runCommands(char** cmd) {
-
 	if (cmd[0] != NULL){
-		if (strcmp(cmd[0], "cd") == 0) {
-			changeDirectory(cmd);
-		}else if (strcmp(cmd[0], "bg") == 0) {
-			add(cmd);
-		}else if (strcmp(cmd[0], "bglist") == 0) {
-			listNodes();
-		}else if (strcmp(cmd[0], "exit") == 0) {
-			exit(1);
-		}else{
-			executeCmd(cmd);
-		}
+		  (strcmp(cmd[0], "cd") == 0) ? changeDirectory(cmd)
+		: (strcmp(cmd[0], "bg") == 0) ? createProcess(cmd)
+		: (strcmp(cmd[0], "bglist") == 0) ? listNodes()
+		: (strcmp(cmd[0], "exit") == 0) ? exit(1)  
+	        : executeCmd(cmd);	
 	}
 }
 
@@ -124,7 +117,6 @@ int countArgs(char** tokens) {
  * Returns:	void
  * Source:	CSC 360 tutorial-2 slides. 	
  */
-
 void tokenize(char** argv, char* userInput) {
 	argv[0] = strtok(userInput, " ");
 	int i = 0;
@@ -158,28 +150,37 @@ void displayPrompt(char* holdPrompt) {
 
 /*----------Part 2----------*/
 
+
 /* Purpose: 	Change the current directory depending on the various
  * 		supported user commands.
  * Parameters 	char** user_arg - the users inputted commands.	
  * Returns:	void
  * Source:	CSC 360 tutorial-2 slides.
+ * 		https://www.geeksforgeeks.org/making-linux-shell-c/
  */
 void changeDirectory(char** user_arg) {
+	/*Go to home directory if user inputs `cd` or `cd ~`*/
 	if (user_arg[1] == NULL || strcmp(user_arg[1], "~") == 0) {
 		chdir(getenv("HOME"));
+	/*Move back on directory if user inputs `cd ..`*/
 	} else if (!strcmp(user_arg[1], "..")) {
 		chdir("../");
+	/*Do nothing if the user inputs more then two commands e.g. `cd A B`*/
 	} else if (countArgs(user_arg) > 2) {
-		perror("chdir");
-	}
-       	else {
+		perror("Error");
+	/*If no such directory exists, warn that it does not exist*/
+	} else if (chdir(user_arg[1]) == -1) {
+		printf("%s: %s\n", user_arg[1], strerror(errno));
+	/*Change to specified directory*/
+	}else {
 		chdir(user_arg[1]);
 	}
 }
 
 /* Purpose:	Allow the user to execute arbitrary commands using the 
  * 		the shell program.
- * Parameters:			
+ * Parameters:	char** cmd - the user inputted command.
+ * Returns:	void
  */
 void executeCmd(char** cmd) {
 	pid_t pid = fork();
@@ -193,9 +194,8 @@ void executeCmd(char** cmd) {
 /* Purpose: 	Check if the child process terminates.
  * Parameters:	void 	
  * Returns:	void
- * Source: 	This function is follows the pseudo implementation learned in tutorial-3.
+ * Source: 	This function follows the pseudo implementation learned in tutorial-3.
  */
-
 void checkChildTermination(void) {
 	if (determineListLength() > 0) {
 		pid_t ter = waitpid(0, NULL, WNOHANG);
@@ -233,17 +233,18 @@ void listNodes(void) {
  * Parameters: 	char** cmd - the command.
  * Returns:	void
  */
-void add(char** cmd) {
+void createProcess(char** cmd) {
 	pid_t pid = fork();
-/*	if (!pid) {
-		execvp(cmd[1], cmd + 1);
-	} else {
-		createNode(cmd, pid);
-	}*/
 	pid == 0 ? execvp(cmd[1], cmd + 1) : createNode(cmd, pid);
 
 }
 
+/* Purpose: 	Add a new node (command) to the front of the linked list.
+ * Parameters: 	char** cmd - the command.
+ * 		pid_t - the process id.
+ * Returns:	void
+ * Source:	CSC 360 tutorial-3.
+ */
 void createNode(char** cmd, pid_t pid) {
 	node* new_node = (node*)malloc(sizeof(node));
 	new_node -> command[0] = '\0';
