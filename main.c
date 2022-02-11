@@ -8,6 +8,9 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
+#define MAXPRMT 256 //Max prompt size
+#define MAXCMD 1024 //Max command size
+
 /*Function Prototypes*/
 void displayPrompt();
 void executeCmd();
@@ -16,27 +19,28 @@ void tokenize();
 int countArgs();
 void addBackground();
 void createProcess();
-void listNodes();
+void displayProcesses();
 void checkChildTermination();
 void runCommands();
 void freeList();
 void createNode();
 
-int main() {
+int main(void) {
 	while(1) {
-		char holdPrompt[256];
+		char holdPrompt[MAXPRMT];
 		displayPrompt(holdPrompt);
-		char* tokens[256];
-		char* user_input = readline(holdPrompt);
 
+		char* user_input = readline(holdPrompt);
 		/*Create a new prompt line if the user presses `Enter`*/
 		if(countArgs(user_input) < 1) {
 			free(user_input);
 			continue;
 		}
-
 		checkChildTermination();
+
+		char* tokens[MAXPRMT];
 		tokenize(tokens, user_input);
+
 		runCommands(tokens);
 		free(user_input);
 	}
@@ -44,12 +48,12 @@ int main() {
 	return 0;
 }
 
-/* Purpose:	typdef sturcture used to group tgether data in a node datatype. 
+/* Purpose:	typdef sturcture used for storing background process info. 
  * Source:	CSC 360 tutorial-2 slides.
  */
 typedef struct Node {
 	pid_t pid;
-	char command[1024];
+	char command[MAXCMD];
 	struct Node* next;
 } node;
 
@@ -64,7 +68,7 @@ void runCommands(char** cmd) {
 	if (cmd[0] != NULL){
 		  (strcmp(cmd[0], "cd") == 0) ? changeDirectory(cmd)
 		: (strcmp(cmd[0], "bg") == 0) ? createProcess(cmd)
-		: (strcmp(cmd[0], "bglist") == 0) ? listNodes()
+		: (strcmp(cmd[0], "bglist") == 0) ? displayProcesses()
 		: (strcmp(cmd[0], "exit") == 0) ? exit(1)  
 	        : executeCmd(cmd);	
 	}
@@ -112,7 +116,7 @@ int countArgs(char** tokens) {
 
 /* Purpose: 	Tokenize user input strings. Seperate each input line by an 
  * 		empty space.
- * Parameters: 	char** tokens - location to store the tokenized input.
+ * Parameters: 	char** argv - location to store the tokenized input.
  * 		char* userInput - the untokenized user input.
  * Returns:	void
  * Source:	CSC 360 tutorial-2 slides. 	
@@ -130,20 +134,23 @@ void tokenize(char** argv, char* userInput) {
 /*----------Part 1----------*/
 
 
-/* 
- * Purpose:    	display the prompt to the terminal.
- * Parameters: 	char* holdPrompt - 
+
+/* Purpose:    	display the prompt to the terminal. E.g:
+ * 		alex@alexh: /home/alex/Desktop/CSC360 >
+ * Parameters: 	char* holdPrompt - the prompt.
  * Returns:	void	
  */
 void displayPrompt(char* holdPrompt) {
 	holdPrompt[0] = '\0';
 
-	char hostname[256], curr_dir[256];
+	char hostname[MAXPRMT], curr_dir[MAXPRMT];
 
+	/*Get the hostname of the current machine.*/
 	gethostname(hostname, sizeof(hostname));
+	/*Gest the pathname of the current working directory.*/
 	getcwd(curr_dir, sizeof(curr_dir));
 
-	snprintf(holdPrompt, 1024, "%s@%s: %s > ", getlogin(), hostname, curr_dir);
+	snprintf(holdPrompt, MAXCMD, "%s@%s: %s > ", getlogin(), hostname, curr_dir);
 
 }
 
@@ -195,6 +202,8 @@ void executeCmd(char** cmd) {
  * Parameters:	void 	
  * Returns:	void
  * Source: 	This function follows the pseudo implementation learned in tutorial-3.
+ * Notes:	As recommended by in tutorial, the WNOHANG flag is used to indicate that 
+ * 		parent process shouldn't wait.
  */
 void checkChildTermination(void) {
 	if (determineListLength() > 0) {
@@ -222,14 +231,14 @@ void checkChildTermination(void) {
  * Parameters:	void
  * Returns:	void
  */
-void listNodes(void) {
+void displayProcesses(void) {
 	for (node* t_head = head; t_head != NULL; t_head = t_head -> next){
 		printf("%d: %s\n", t_head -> pid, t_head -> command);
 	}
 	printf("Total Background Jobs: %d\n", determineListLength());
 }	
 
-/* Purpose: 	Add a new node (command) to the front of the linked list.	
+/* Purpose: 	Create a background process.	
  * Parameters: 	char** cmd - the command.
  * Returns:	void
  */
@@ -255,4 +264,4 @@ void createNode(char** cmd, pid_t pid) {
 	}
 	new_node -> next = head;
 	head = new_node;
-}	
+}
