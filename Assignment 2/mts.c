@@ -10,7 +10,7 @@
 #define USLEEP_INTERVAL 50000
 #define ON
 #define READY
-
+#define STARVATION 4
 struct train_t {
   int ID; //file-order
   int loading_time;
@@ -18,14 +18,15 @@ struct train_t {
   char direction; // east or west
   int is_ready;
   int crossed;
-} trains[100];
+} trains[1000];
 
+//struct train* highest_priority_train;
 struct timespec start, stop;
-int total_trains;
+int total_trains = 0;
 
-pthread_cond_t cross[100];
-pthread_mutex_t crossMutex[100];
-pthread_t threads[100];
+pthread_cond_t cross[1000];
+pthread_mutex_t crossMutex[1000];
+pthread_t threads[1000];
 
 pthread_mutex_t finishLoadingMutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -42,26 +43,25 @@ void operator();
 void looping();
 void build();
 int getTicks();
+void create();
+void updateTrains(char);
+int sameDirections();
 
 int main(int argc, char *argv[]) {
-  for (int i=0;i<100;i++) {
-    pthread_cond_init(&cross[i], NULL);
-    pthread_mutex_init(&crossMutex[i], NULL);
-  }
-
-  build(argv[1]);
-  beginningTicks = getTicks();
-
-  // spawn all train threads
-  for (int i=0;i<total_trains; i++) {
-    // spawn a thread
-    pthread_create(&threads[i], NULL, train_driver, (void*)&trains[i]);
-  }
-
-  // run operator on the main thead
-  operator();
-
+ 	build(argv[1]);
+  	beginningTicks = getTicks();
+	create();
+  	operator();
 }
+
+void create() {
+	for (int i=0;i<total_trains; i++) {
+    		pthread_cond_init(&cross[i], NULL);
+  	  	pthread_mutex_init(&crossMutex[i], NULL);
+    		pthread_create(&threads[i], NULL, train_driver, (void*)&trains[i]);
+  	}
+}
+
 
 int getTicks() {
   struct timespec start;
@@ -136,24 +136,33 @@ int all_trains_crossed() {
   	return 1;
 }
 
-char last_three_trains[] = {'\0', '\0', '\0'};
-int starvation_case(char direction) {
-  int i;
-  for (i=0; i<4; i++) {
-    if (last_three_trains[i] == toupper(direction) || last_three_trains[i] == '\0') {
-      return 0;
-    }
-  }
-  // return true if all three trains were in opposite direction
-  return 1;
+
+int sameDirection(struct train_t* node, struct train_t** highest) {
+	if (toupper(node->direction) == toupper((*highest)->direction) 
+		&& (node->loading_time <= (*highest)->loading_time)) {
+		*highest = node;
+		return 1;
+      	}
+	return 0;
 }
 
+char last_four_trains[] = {'\0', '\0', '\0', '\0'};
+int starvation_case(char direction) {    
+  	for (int i = 0; i < STARVATION; i++) {
+   		if (last_four_trains[i] == toupper(direction) || last_four_trains[i] == '\0') {
+      			return 0;
+    		}
+  	}
+  // return true if all three trains were in opposite direction
+  	return 1;
+}
+
+
 int signal_highest_priority_ready_train() {
-  struct train_t* highest_priority_train = NULL;
+struct train_t* highest_priority_train = NULL;
 
-  for (int i=total_trains-1; i>=0; i--) {
+  for (int i = total_trains - 1; i >= 0; i--) {
     struct train_t* node = &trains[i];
-
     if (!node->is_ready || node->crossed) {
       // skip trains that are not ready or have already crossed
       continue;
@@ -164,7 +173,6 @@ int signal_highest_priority_ready_train() {
       highest_priority_train = node;
       continue;
     }
-
 
    // avoidStarvation(highest_priority_train->direction)
     // check for starvation
@@ -177,9 +185,11 @@ int signal_highest_priority_ready_train() {
       continue;
     }
 
+
+
     // pick the highest pri
     if (isupper(node->direction) && islower(highest_priority_train->direction)) {
-      // if node has higher priority then pick it
+	    
       highest_priority_train = node;
       continue;
     } else if (islower(node->direction) && isupper(highest_priority_train->direction)) {
@@ -187,24 +197,18 @@ int signal_highest_priority_ready_train() {
       continue;
     }
 
-    // other rules if same priority
-
-    // same direction case
-    if (toupper(node->direction) == toupper(highest_priority_train->direction)) {
-      // if both in same direction pick then one with smaller loading time
-      if (node->loading_time <= highest_priority_train->loading_time) {
-        highest_priority_train = node;
-      }
-      continue;
+    
+    if (sameDirection(node, &highest_priority_train)) {
+	continue;
     }
 
     // opposite direction case
-    if (last_three_trains[0] == '\0') {
+    if (last_four_trains[0] == '\0') {
        if (toupper(node->direction) == 'E') {
          // pick eastbound train if no train has crossed yet
          highest_priority_train = node;
       }
-    } else if (toupper(node->direction) != last_three_trains[0]) {
+    } else if (toupper(node->direction) != last_four_trains[0]) {
       // pick the train travelling opposite to the last train that crossed track
       highest_priority_train = node;
     }
@@ -215,11 +219,7 @@ int signal_highest_priority_ready_train() {
     return 0;
   }
 
-  // update the last_three_trains array
-  last_three_trains[2] = last_three_trains[1];
-  last_three_trains[1] = last_three_trains[0];
-  last_three_trains[0] = toupper(highest_priority_train->direction);
-
+  updateTrains(highest_priority_train->direction);
   // take highest_priority_train->crossMutex
   pthread_mutex_lock(&crossMutex[highest_priority_train->ID]);
 
@@ -230,6 +230,14 @@ int signal_highest_priority_ready_train() {
   pthread_mutex_unlock(&crossMutex[highest_priority_train->ID]);
   return 1;
 }
+
+void updateTrains(char direction) {
+	for (int i = STARVATION-1; i >= 0; i--) {
+		last_four_trains[i] = last_four_trains[i-1];
+	}
+	last_four_trains[0] = toupper(direction);
+}
+
 
 // definition of operator function
 void operator() {
@@ -252,21 +260,19 @@ void operator() {
 void build(char *f) {
 	FILE *fp = fopen(f, "r");
 
- 	char direction;
-  	int loading_time;
-  	int crossing_time;
-  	total_trains = 0;
+	int crossing_time, loading_time;
+	char direction;
 
-  	while(fscanf(fp, "%c %d %d\n", &direction, &loading_time, &crossing_time) != EOF){
+  	while(fscanf(fp, "%c %d %d\n", &direction, &loading_time, &crossing_time) != EOF) {
     		struct train_t* node = &trains[total_trains];
-    		node->ID = total_trains++;
+    		node->ID = total_trains;
     		node->loading_time = loading_time;
     		node->crossing_time = crossing_time;
     		node->direction = direction;
-    		node->is_ready = 0;
-    		node->crossed = 0;
+    		node->is_ready;
+    		node->crossed;
+		total_trains++;
   }
   fclose(fp);
-
 }
 
