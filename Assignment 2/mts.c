@@ -146,72 +146,64 @@ int sameDirection(struct train_t* node, struct train_t** highest) {
 	return 0;
 }
 
-char last_four_trains[] = {'\0', '\0', '\0', '\0'};
-int starvation_case(char direction) {    
-  	for (int i = 0; i < STARVATION; i++) {
-   		if (last_four_trains[i] == toupper(direction) || last_four_trains[i] == '\0') {
-      			return 0;
-    		}
-  	}
-  // return true if all three trains were in opposite direction
-  	return 1;
+int highestPriority(struct train_t* node, struct train_t** highest) {
+	if (isupper(node->direction) && islower((*highest)->direction)) {
+	    	*highest = node;
+      		return 1;
+  	} else if (islower(node->direction) && isupper((*highest)->direction)) {
+    		return 1;
+	}
+	return 0; 
 }
 
 
+char last_four_trains[] = {'\0', '\0', '\0', '\0'};
+int starvation_case(struct train_t* node, struct train_t** highest) {    
+	int flag1;
+	int flag2;
+  	for (int i = 0; i < STARVATION; i++) {
+   		if (last_four_trains[i] == toupper(node->direction) || last_four_trains[i] == '\0'){
+			flag1 = 1;
+    		}
+		if (last_four_trains[i] == toupper((*highest)->direction) || last_four_trains[i] == '\0'){
+			flag2 = 1;
+  	
+		}	
+	}
+	if (flag1 == 0 && flag2 == 1) {
+		*highest = node;
+		return 1;
+	} else if (flag1 == 1 && flag2 == 0) {
+		return 1;
+	}
+  	return 0;
+}
+
+
+void oppositeDirection(struct train_t* node, struct train_t** highest) {
+	if ((toupper(node->direction) == 'E' && last_four_trains[0] == '\0') 
+			|| toupper(node->direction) != last_four_trains[0]) {
+		*highest = node;
+	}
+}
+
 int signal_highest_priority_ready_train() {
-struct train_t* highest_priority_train = NULL;
-
-  for (int i = total_trains - 1; i >= 0; i--) {
-    struct train_t* node = &trains[i];
-    if (!node->is_ready || node->crossed) {
-      // skip trains that are not ready or have already crossed
-      continue;
-    }
-
-    if (highest_priority_train == NULL) {
-      // if no other train is ready yet, pick this one
-      highest_priority_train = node;
-      continue;
-    }
-
-   // avoidStarvation(highest_priority_train->direction)
-    // check for starvation
-    if (starvation_case(node->direction) && !starvation_case(highest_priority_train->direction)) {
-      // pick node if it's solving starvation and highest_priority_train is not
-      highest_priority_train = node;
-      continue;
-    } else if (!starvation_case(node->direction) && starvation_case(highest_priority_train->direction)) {
-      // skip node if it's not solving starvation and highest_priority_train is
-      continue;
-    }
-
-
-
-    // pick the highest pri
-    if (isupper(node->direction) && islower(highest_priority_train->direction)) {
-	    
-      highest_priority_train = node;
-      continue;
-    } else if (islower(node->direction) && isupper(highest_priority_train->direction)) {
-      // if node is lower priority then skip it
-      continue;
-    }
-
-    
-    if (sameDirection(node, &highest_priority_train)) {
-	continue;
-    }
-
-    // opposite direction case
-    if (last_four_trains[0] == '\0') {
-       if (toupper(node->direction) == 'E') {
-         // pick eastbound train if no train has crossed yet
-         highest_priority_train = node;
-      }
-    } else if (toupper(node->direction) != last_four_trains[0]) {
-      // pick the train travelling opposite to the last train that crossed track
-      highest_priority_train = node;
-    }
+	struct train_t* highest_priority_train = NULL;
+  	for (int i = total_trains - 1; i >= 0; i--) {
+    		struct train_t* node = &trains[i];
+    		if (!node->is_ready || node->crossed) { 
+			continue;
+		} else if (highest_priority_train == NULL) {
+      			highest_priority_train = node;
+      			continue;
+		} else if (starvation_case(node, &highest_priority_train)) {
+			continue;
+		} else if (highestPriority(node, &highest_priority_train)) { 
+			continue;
+		} else if (sameDirection(node, &highest_priority_train)) { 
+			continue;
+		}
+		oppositeDirection(node, &highest_priority_train);
   }
 
   if (highest_priority_train == NULL) {
