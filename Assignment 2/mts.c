@@ -11,6 +11,8 @@
 #define ON
 #define READY
 #define STARVATION 4
+
+
 struct train_t {
   int ID; //file-order
   int loading_time;
@@ -28,30 +30,55 @@ pthread_cond_t cross[1000];
 pthread_mutex_t crossMutex[1000];
 pthread_t threads[1000];
 
-pthread_mutex_t finishLoadingMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t finishLoadingMutex;
 
-pthread_cond_t finishCrossing = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t finishedCrossingMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t finishCrossing;
+pthread_mutex_t finishedCrossingMutex;
 
 // 1 tick = 0.1 seconds
 int beginningTicks = 0;
 
 void* train_driver();
-int all_trains_crossed();
 int signal_highest_priority_ready_train();
-void operator();
+void dispatcher();
 void looping();
 void build();
 int getTicks();
 void create();
 void updateTrains(char);
 int sameDirections();
+void joinThreads();
+void destroyTrains();
 
 int main(int argc, char *argv[]) {
  	build(argv[1]);
   	beginningTicks = getTicks();
+	pthread_mutex_init(&finishLoadingMutex, NULL);
+	pthread_cond_init(&finishCrossing, NULL);
+	pthread_mutex_init(&finishedCrossingMutex, NULL); 
 	create();
-  	operator();
+  	dispatcher();
+	joinThreads();
+	destroyTrains();
+	return 0;
+}
+
+
+void destroyTrains() {
+	pthread_cond_destroy(&finishCrossing);
+	pthread_mutex_destroy(&finishLoadingMutex);
+	pthread_mutex_destroy(&finishedCrossingMutex);
+	for (int i = 0; i < total_trains; i++) {
+		pthread_cond_destroy(&cross[i]);
+		pthread_mutex_destroy(&crossMutex[i]);
+	}
+
+}
+
+void joinThreads() {
+	for (int i = 0; i < total_trains; i++) {
+		pthread_join(threads[i], NULL);
+	}
 }
 
 void create() {
@@ -122,18 +149,6 @@ void* train_driver(void* arg) {
 	looping(t, &t->crossed, test, 1);	
 
 	return NULL;
-}
-
-
-int all_trains_crossed() {
-	for (int i=0;i<total_trains;i++) {
-    		if (!trains[i].crossed) {
-      		// return false if any train has not crossed yet
-      			return 0;
-    		}
-  	}
-  	// return true if all trains have crossed
-  	return 1;
 }
 
 
@@ -231,22 +246,23 @@ void updateTrains(char direction) {
 }
 
 
-// definition of operator function
-void operator() {
-  // sleep for 0.05 seconds
-  usleep(USLEEP_INTERVAL);
-
-  while (!all_trains_crossed()) { // start an infinite loop
-    if (!signal_highest_priority_ready_train()) {
-      // sleep for 0.05 seconds
-      usleep(USLEEP_INTERVAL);
-      continue;
-    }
-
-    // wait for finishCrossing CV
-    pthread_cond_wait(&finishCrossing, &finishedCrossingMutex);
-    pthread_mutex_unlock(&finishedCrossingMutex);
-  }
+void dispatcher() {
+  	usleep(USLEEP_INTERVAL);
+	int notCrossed = 0;
+	for (int i = 0; i < total_trains; i++) {
+		if (!trains[i].crossed) {
+			notCrossed++;
+		}
+	}
+	while (notCrossed > 0) {
+		if (!signal_highest_priority_ready_train()) {
+			usleep(USLEEP_INTERVAL);
+			continue;
+		}
+   	pthread_cond_wait(&finishCrossing, &finishedCrossingMutex);
+    	pthread_mutex_unlock(&finishedCrossingMutex);
+    	notCrossed--;
+	}
 }
 
 void build(char *f) {
