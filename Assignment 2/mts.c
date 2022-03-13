@@ -10,38 +10,32 @@
 #define HOUR 36000
 #define SIXHUN 600
 #define TEN 10
-#define USLEEP_INTERVAL 50000
+#define HALFSEC 50000
 #define MAXTRAINS 10000
 #define STARVATION 4
 
 
-struct train_t {
-  int number;
-  char direction;
-  int loading_t;
-  int crossing_t;
-  int is_ready;
-  int crossed;
+struct train {
+  int number;		//Train number
+  int ready;		//Ready to cross track: 0-No 1-Yes
+  char direction;	//Direction that the train wants to cross
+  int loading_t;	//Loading time of the train
+  int crossing_t;	//Crossing time of the train
+  int crossed;		//Indicates if train has crossed the track 0-No 1-Yes
 } trains[MAXTRAINS];
 
-int trainCount = 0;
-int starvationCount[STARVATION];
-
-pthread_cond_t cross[MAXTRAINS];
-pthread_mutex_t track[MAXTRAINS];
-pthread_t threads[MAXTRAINS];
-
-pthread_mutex_t finishLoadingMutex;
+int trainCount = 0;			//Keep track of the # of trains
+int timeTrack = 0;			//Keep track of the time
+int starvationCount[STARVATION];	
 
 pthread_cond_t finishCrossing;
+pthread_mutex_t finishLoadingMutex;
 pthread_mutex_t finishedCrossingMutex;
-
-int timeTrack = 0;
 
 
 /*Function Prototypes*/
 void extractData();
-void* train_driver();
+void* trainRoutine();
 int nextTrain();
 void dispatcher();
 int timer();
@@ -73,7 +67,7 @@ void extractData(char *f) {
 	char dir;
 
   	for (;fscanf(fp, "%c %d %d\n", &dir, &load_t, &cross_t) != EOF; trainCount++) {
-    		struct train_t* train = &trains[trainCount];
+    		struct train* train = &trains[trainCount];
     		train->number = trainCount;
     		train->loading_t = load_t;
     		train->crossing_t = cross_t;
@@ -81,6 +75,7 @@ void extractData(char *f) {
   	}
   	fclose(fp);
 }
+
 
 /* Purpose: 	Start a timer to keep track of the train timings.
  * Parameters: 	void
@@ -97,6 +92,10 @@ int timer(void) {
   	return (start.tv_sec * TEN) + (start.tv_nsec / HUNMIL);
 }
 
+pthread_cond_t cross[MAXTRAINS];
+pthread_mutex_t track[MAXTRAINS];
+pthread_t threads[MAXTRAINS];
+
 /* Purpose: 	For each train; create a thread, condition variable, and mutex.
  * Parameters: 	void
  * Returns: 	void
@@ -106,7 +105,7 @@ void create(void) {
 	for (int i = 0 ; i < trainCount; i++) {
     		pthread_cond_init(&cross[i], NULL);
   	  	pthread_mutex_init(&track[i], NULL);
-    		pthread_create(&threads[i], NULL, train_driver, (void*) &trains[i]);
+    		pthread_create(&threads[i], NULL, trainRoutine, (void*) &trains[i]);
   	}
 }
 
@@ -117,7 +116,7 @@ void create(void) {
  * Returns:	void
  */
 void dispatcher(void) {
-	usleep(USLEEP_INTERVAL); 
+	usleep(HALFSEC); 
 	int notCrossed = 0;
 	for (int i = 0; i < trainCount; i++) {
 		if (!trains[i].crossed) {
@@ -126,7 +125,7 @@ void dispatcher(void) {
 	}
 	while (notCrossed > 0) {
 		if (!nextTrain()) {
-			usleep(USLEEP_INTERVAL);
+			usleep(HALFSEC);
 			continue;
 		}
    	pthread_cond_wait(&finishCrossing, &finishedCrossingMutex);
@@ -146,7 +145,7 @@ void dispatcher(void) {
  * 		struct train_t* t - Struct data type of train information.
  * Returns:	void		
  */
-void printStatus(int utime, int pos, struct train_t* t ) {
+void printStatus(int utime, int pos, struct train* t) {
 	printf("%02d:%02d:%02d.%d Train %2d %s %4s\n", 
 			utime/HOUR, (utime%HOUR)/SIXHUN, (utime%SIXHUN/TEN), utime%TEN, 
 			t->number, pos==2?"is ready to go":pos==0?"is ON the main track going":
@@ -165,7 +164,7 @@ void printStatus(int utime, int pos, struct train_t* t ) {
  *			  	- 1: crossed
  * Returns:	void
  */
-void trainStatus(struct train_t* t, int *is_ready, int loading_time, int pos) {
+void trainStatus(struct train* t, int *is_ready, int loading_time, int pos) {
 	while (!*is_ready) {
 		if ((timer() - timeTrack) >= loading_time) {
 			pos == 2 ? pthread_mutex_lock(&finishLoadingMutex):
@@ -177,26 +176,28 @@ void trainStatus(struct train_t* t, int *is_ready, int loading_time, int pos) {
 				pthread_mutex_unlock(&finishedCrossingMutex);			
 		} else {
 
-			usleep(USLEEP_INTERVAL);
+			usleep(HALFSEC);
 		}
 	}
 }
+
 
 /* Purpose: 	Start the train routine for each thread.
  * Parameters:	void* args - a train
  * Returns:	void* 
  */
-void* train_driver(void* args) {
-  	struct train_t* t = args;
-  	pthread_mutex_lock(&track[t->number]);
-  	trainStatus(t, &t->is_ready, t->loading_t, 2);
-  	pthread_cond_wait(&cross[t->number], &track[t->number]);
-  	int getting_on_time = timer() - timeTrack;
-  	printStatus(getting_on_time, 0, t);
-  	pthread_mutex_unlock(&track[t->number]);
-	trainStatus(t, &t->crossed, (t->crossing_t + getting_on_time), 1);
+void* trainRoutine(void* args) {
+  	struct train* train = args;
+  	pthread_mutex_lock(&track[train->number]);
+  	trainStatus(train, &train->ready, train->loading_t, 2);
+  	pthread_cond_wait(&cross[train->number], &track[train->number]);
+  	int trainTime = timer() - timeTrack;
+  	printStatus(trainTime, 0, train);
+  	pthread_mutex_unlock(&track[train->number]);
+	trainStatus(train, &train->crossed, (train->crossing_t + trainTime), 1);
 	pthread_exit(0);
 }
+
 
 /* Purpose:	Check if two trains are traveling in the same direction.
  * Parameters:	struct train_t* train - Struct data type of trian information.
@@ -205,14 +206,22 @@ void* train_driver(void* args) {
  * Returns:	1 if trains are in the same direction or the current train has a smaller
  * 		loading time the the highest priority train. Else 0.
  */
-int sameDirection(struct train_t* train, struct train_t** highest) {
+int sameDirection(struct train* train, struct train** highest) {
+	/*Check if same direction, different loading time*/
 	if (toupper(train->direction) == toupper((*highest)->direction) 
-		&& (train->loading_t <= (*highest)->loading_t)) {
+		&& (train->loading_t < (*highest)->loading_t)) {
 		*highest = train;
 		return 1;
-      	}
+	/*Check if same direction, same loading time, but different file positions*/
+      	} else if (toupper(train->direction) == toupper((*highest)->direction) 
+			&& (train->loading_t) == (*highest)->loading_t 
+			&& (train->number) < (*highest)->number) {
+		*highest = train;
+		return 1;
+	}
 	return 0;
 }
+
 
 /* Purpose: 	Determines if a train is going Eeast or West:
  * 			- High priority: East (E) or West (W)
@@ -234,7 +243,7 @@ int priority(char direction) {
  * Returns:	1 if one train has higher direction priority over the other.
  * 		Else 0.
  */
-int highestPriority(struct train_t* train, struct train_t** highest) {
+int highestPriority(struct train* train, struct train** highest) {
 	if (priority(train->direction) && !priority((*highest)->direction)) {
 	    	*highest = train;
       		return 1;
@@ -275,7 +284,7 @@ int checkStarvation(char direction, int i) {
  * 		struct train_t** highest - Current highest priority train.
  * Returns:	1 if starvation occurs. Else 0.
  */
-int starvationCase(struct train_t* train, struct train_t** highest) {    
+int starvationCase(struct train* train, struct train** highest) {    
 	int flag1;
 	int flag2;
   	for (int i = 0; i < STARVATION; i++) {
@@ -297,7 +306,7 @@ int starvationCase(struct train_t* train, struct train_t** highest) {
  * 		struct train_t** highest - Current highest priority train.
  * Returns: 	void
  */
-void oppositeDirection(struct train_t* train, struct train_t** highest) {
+void oppositeDirection(struct train* train, struct train** highest) {
 	if (toupper(train->direction) != starvationCount[0] || toupper(train->direction) == 'E' 
 				&& starvationCount[0] == '\0') {
 		*highest = train;
@@ -310,7 +319,7 @@ void oppositeDirection(struct train_t* train, struct train_t** highest) {
  * Parameters: 	struct train_t* priorityTrain - The train to cross the track.
  * Returns: 	void
  */
-void updateTrains(struct train_t* priorityTrain) {
+void updateTrains(struct train* priorityTrain) {
 	for (int i = STARVATION-1; i >= 0; i--) {
 		starvationCount[i] = starvationCount[i-1];
 	}
@@ -323,6 +332,24 @@ void updateTrains(struct train_t* priorityTrain) {
 }
 
 
+/* Purpose: 	Ensure that the train is not empty, has not crossed,
+ * 		or is not yet ready to cross.
+ * Parameters:	struct train_t* train - Struct data type of train information
+ *		struct train_t** highest - The current highest priority train.
+ * Returns: 	1 if train has crossed, is not ready, or is NULL. Else 0.
+ */
+int baseCase(struct train* train, struct train** highest) {
+	if (train->crossed || train->ready == 0) {
+		return 1;
+	}
+	if ((*highest) == NULL) {
+		*highest = train;
+		return 1;
+	}
+	return 0;
+}
+
+
 /* Purpose: 	Determine which train should cross the track next. This
  * 		function organizes the simulation rules.
  * Parameters:  void
@@ -330,22 +357,14 @@ void updateTrains(struct train_t* priorityTrain) {
  * 		0 if the highest priority train is NULL.
  */
 int nextTrain(void) {
-	struct train_t* priorityTrain = NULL;
+	struct train* priorityTrain = NULL;
   	for (int i = trainCount - 1; i >= 0; i--) {
-    		struct train_t* node = &trains[i];
-    		if (!node->is_ready || node->crossed) {
-		       	continue;
-		} else if (priorityTrain == NULL) {
-			priorityTrain = node;
-			continue;
-		} else if (starvationCase(node, &priorityTrain)) {
-			continue;
-		} else if (highestPriority(node, &priorityTrain)) { 
-			continue;
-		} else if (sameDirection(node, &priorityTrain)) {
-			continue;
-		}
-		oppositeDirection(node, &priorityTrain);
+    		struct train* train = &trains[i];
+    		if (baseCase(train, &priorityTrain)) continue;
+		else if (starvationCase(train, &priorityTrain)) continue;
+		else if (highestPriority(train, &priorityTrain)) continue;
+		else if (sameDirection(train, &priorityTrain)) continue;	
+		oppositeDirection(train, &priorityTrain);
 	}
   	if (priorityTrain == NULL) { 
 		return 0;
@@ -365,6 +384,7 @@ void joinThreads(void) {
 		pthread_join(threads[i], NULL);
 	}
 }
+
 
 /* Purpose: 	Destroy the train mutex's and conditon variables
  * Parameters:  void
