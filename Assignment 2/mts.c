@@ -36,7 +36,7 @@ pthread_mutex_t finishLoadingMutex;
 pthread_cond_t finishCrossing;
 pthread_mutex_t finishedCrossingMutex;
 
-int beginningTicks = 0;
+int timeTrack = 0;
 
 
 /*Function Prototypes*/
@@ -53,7 +53,7 @@ void createEmpty();
 
 int main(int argc, char *argv[]) {
  	extractData(argv[1]);
-  	beginningTicks = timer();
+  	timeTrack = timer();
 	pthread_mutex_init(&finishLoadingMutex, NULL);
 	pthread_cond_init(&finishCrossing, NULL);
 	pthread_mutex_init(&finishedCrossingMutex, NULL); 
@@ -73,17 +73,21 @@ void extractData(char *f) {
 	char dir;
 
   	for (;fscanf(fp, "%c %d %d\n", &dir, &load_t, &cross_t) != EOF; trainCount++) {
-    		struct train_t* node = &trains[trainCount];
-    		node->number = trainCount;
-    		node->loading_t = load_t;
-    		node->crossing_t = cross_t;
-    		node->direction = dir;
+    		struct train_t* train = &trains[trainCount];
+    		train->number = trainCount;
+    		train->loading_t = load_t;
+    		train->crossing_t = cross_t;
+    		train->direction = dir;
   	}
   	fclose(fp);
 }
 
-
-int timer() {
+/* Purpose: 	Start a timer to keep track of the train timings.
+ * Parameters: 	void
+ * Returns: 	The time.
+ * Source: 	Tutorial 6 slides.
+ */
+int timer(void) {
   	struct timespec start;
 
   	if (clock_gettime(CLOCK_REALTIME, &start) == -1){
@@ -93,8 +97,11 @@ int timer() {
   	return (start.tv_sec * TEN) + (start.tv_nsec / HUNMIL);
 }
 
-
-void create() {
+/* Purpose: 	For each train; create a thread, condition variable, and mutex.
+ * Parameters: 	void
+ * Returns: 	void
+ */
+void create(void) {
 	createEmpty();
 	for (int i = 0 ; i < trainCount; i++) {
     		pthread_cond_init(&cross[i], NULL);
@@ -105,7 +112,11 @@ void create() {
 
 /*-----Train Functions-----*/
 
-void dispatcher() {
+/* Purpose: 	Dispatch each train.
+ * Parameters:	void
+ * Returns:	void
+ */
+void dispatcher(void) {
 	usleep(USLEEP_INTERVAL); 
 	int notCrossed = 0;
 	for (int i = 0; i < trainCount; i++) {
@@ -125,17 +136,32 @@ void dispatcher() {
 }
 
 
-void printStatus(int ticks, int pos, struct train_t* t ) {
+/* Purpose: 	Print the status of each train in the following formats:
+ *		 - 00:00:00.0 Train <number> is ready to go <East/West>
+ *		 - 00:00:00.0 Train <number> is <ON/OFF> the main track going <EAST/WEST>
+ * Parameters:	int utime - unformatted time
+ * 		int pos - determines if the Train is loaded or or ON/OFF the main track eg:
+ * 				- pos = 2: the train has been loaded
+ * 				- pos = 1: the train ON/OFF the main track
+ * 		struct train_t* t - Struct data type of train information.
+ * Returns:	void		
+ */
+void printStatus(int utime, int pos, struct train_t* t ) {
 	printf("%02d:%02d:%02d.%d Train %2d %s %4s\n", 
-			ticks/HOUR, (ticks%HOUR)/SIXHUN, (ticks%SIXHUN/TEN), ticks%TEN, 
+			utime/HOUR, (utime%HOUR)/SIXHUN, (utime%SIXHUN/TEN), utime%TEN, 
 			t->number, pos==2?"is ready to go":pos==0?"is ON the main track going":
 			"is OFF the main track going", t->direction == 'e'?"East":
 			t->direction == 'E'?"East":"West");
 }
 
+
+/* Purpose:	
+ *
+ *
+ */
 void trainStatus(struct train_t* t, int *is_ready, int loading_time, int pos) {
 	while (!*is_ready) {
-		if ((timer() - beginningTicks) >= loading_time) {
+		if ((timer() - timeTrack) >= loading_time) {
 			pos == 2 ? pthread_mutex_lock(&finishLoadingMutex):
 				pthread_mutex_lock(&finishedCrossingMutex);
 			printStatus(loading_time, pos, t);
@@ -156,7 +182,7 @@ void* train_driver(void* arg) {
   	pthread_mutex_lock(&crossMutex[t->number]);
   	trainStatus(t, &t->is_ready, t->loading_t, 2);
   	pthread_cond_wait(&cross[t->number], &crossMutex[t->number]);
-  	int getting_on_time = timer() - beginningTicks;
+  	int getting_on_time = timer() - timeTrack;
   	printStatus(getting_on_time, 0, t);
   	pthread_mutex_unlock(&crossMutex[t->number]);
 	trainStatus(t, &t->crossed, (t->crossing_t + getting_on_time), 1);
@@ -183,7 +209,7 @@ int highestPriority(struct train_t* node, struct train_t** highest) {
 	return 0; 
 }
 
-void createEmpty() {
+void createEmpty(void) {
 	for (int i = 0; i < STARVATION; i++) {
 		starvationCount[i] = '\0';		
 	}
@@ -201,13 +227,6 @@ int starvation_case(struct train_t* node, struct train_t** highest) {
 	int flag1;
 	int flag2;
   	for (int i = 0; i < STARVATION; i++) {
-   /*		if (starvationCount[i] == toupper(node->direction) || starvationCount[i] == '\0'){
-			flag1 = 1;
-    		}
-		if (starvationCount[i] == toupper((*highest)->direction) || starvationCount[i] == '\0'){
-			flag2 = 1;
-  	
-		}*/
 		flag1 = checkStarvation(node->direction, i);
 		flag2 = checkStarvation((*highest)->direction, i);	
 	}
@@ -222,8 +241,8 @@ int starvation_case(struct train_t* node, struct train_t** highest) {
 
 
 void oppositeDirection(struct train_t* node, struct train_t** highest) {
-	if ((toupper(node->direction) == 'E' && starvationCount[0] == '\0') 
-			|| toupper(node->direction) != starvationCount[0]) {
+	if (toupper(node->direction) != starvationCount[0] || toupper(node->direction) == 'E' 
+				&& starvationCount[0] == '\0') {
 		*highest = node;
 	}
 }
@@ -239,45 +258,44 @@ void updateTrains(char direction) {
 
 
 
-int nextTrain() {
-	struct train_t* highest_priority_train = NULL;
+int nextTrain(void) {
+	struct train_t* priorityTrain = NULL;
   	for (int i = trainCount - 1; i >= 0; i--) {
     		struct train_t* node = &trains[i];
-    		if (!node->is_ready || node->crossed) { 
+    		if (!node->is_ready || node->crossed) {
+		       	continue;
+		} else if (priorityTrain == NULL) {
+			priorityTrain = node;
 			continue;
-		} else if (highest_priority_train == NULL) {
-      			highest_priority_train = node;
-      			continue;
-		} else if (starvation_case(node, &highest_priority_train)) {
+		} else if (starvation_case(node, &priorityTrain)) {
 			continue;
-		} else if (highestPriority(node, &highest_priority_train)) { 
+		} else if (highestPriority(node, &priorityTrain)) { 
 			continue;
-		} else if (sameDirection(node, &highest_priority_train)) { 
+		} else if (sameDirection(node, &priorityTrain)) {
 			continue;
 		}
-		oppositeDirection(node, &highest_priority_train);
+		oppositeDirection(node, &priorityTrain);
 	}
-  	if (highest_priority_train == NULL) {
-    		return 0;
-  	}
-  	updateTrains(highest_priority_train->direction);
-  	pthread_mutex_lock(&crossMutex[highest_priority_train->number]);
-  	pthread_cond_signal(&cross[highest_priority_train->number]);
+  	if (priorityTrain == NULL) return 0;
+  	
+  	updateTrains(priorityTrain->direction);
+  	pthread_mutex_lock(&crossMutex[priorityTrain->number]);
+  	pthread_cond_signal(&cross[priorityTrain->number]);
   	pthread_mutex_lock(&finishedCrossingMutex);
-  	pthread_mutex_unlock(&crossMutex[highest_priority_train->number]);
+  	pthread_mutex_unlock(&crossMutex[priorityTrain->number]);
   	return 1;
 }
 
 /*-----Terminate Trains-----*/
 
-void joinThreads() {
+void joinThreads(void) {
 	for (int i = 0; i < trainCount; i++) {
 		pthread_join(threads[i], NULL);
 	}
 }
 
 
-void destroyTrains() {
+void destroyTrains(void) {
 	pthread_cond_destroy(&finishCrossing);
 	pthread_mutex_destroy(&finishLoadingMutex);
 	pthread_mutex_destroy(&finishedCrossingMutex);
