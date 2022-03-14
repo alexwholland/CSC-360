@@ -28,11 +28,11 @@ struct train trains[MAXTRAINS];
 
 int trainCount = 0;			//Keep track of the # of trains
 int timeTrack = 0;			//Keep track of the time
-int starvationCount[STARVATION];	
+int starvationCount[STARVATION];	//Keep track of N trains for starvation case
 
-pthread_cond_t finishCrossing;
-pthread_mutex_t finishLoadingMutex;
-pthread_mutex_t finishedCrossingMutex;
+pthread_cond_t crossingCon;		
+pthread_mutex_t loadingFinishedM;
+pthread_mutex_t crossingFinishedM;
 
 
 /*Function Prototypes*/
@@ -54,9 +54,9 @@ int main(int argc, char *argv[]) {
 	}
  	extractData(argv[1]);
   	timeTrack = timer();
-	pthread_mutex_init(&finishLoadingMutex, NULL);
-	pthread_cond_init(&finishCrossing, NULL);
-	pthread_mutex_init(&finishedCrossingMutex, NULL); 
+	pthread_mutex_init(&loadingFinishedM, NULL);
+	pthread_cond_init(&crossingCon, NULL);
+	pthread_mutex_init(&crossingFinishedM, NULL); 
 	create();
   	dispatcher();
 	joinThreads();
@@ -66,6 +66,10 @@ int main(int argc, char *argv[]) {
 
 /*-----Train Setup-----*/
 
+/* Purpose: Open the input file and store the information into a struct.
+ * Parameters: char *f - the file.
+ * Returns void
+ */
 void extractData(char *f) {
 	FILE *fp = fopen(f, "r");
 
@@ -134,8 +138,8 @@ void dispatcher(void) {
 			usleep(HALFSEC);
 			continue;
 		}
-   	pthread_cond_wait(&finishCrossing, &finishedCrossingMutex);
-    	pthread_mutex_unlock(&finishedCrossingMutex);
+   	pthread_cond_wait(&crossingCon, &crossingFinishedM);
+    	pthread_mutex_unlock(&crossingFinishedM);
     	notCrossed--;
 	}
 }
@@ -173,13 +177,13 @@ void printStatus(int utime, int pos, struct train* t) {
 void trainStatus(struct train* t, int *is_ready, int loading_time, int pos) {
 	while (!*is_ready) {
 		if ((timer() - timeTrack) >= loading_time) {
-			pos == 2 ? pthread_mutex_lock(&finishLoadingMutex):
-				pthread_mutex_lock(&finishedCrossingMutex);
+			pos == 2 ? pthread_mutex_lock(&loadingFinishedM):
+				pthread_mutex_lock(&crossingFinishedM);
 			printStatus(loading_time, pos, t);
 			*is_ready = 1;
-			pos == 2 ? pthread_mutex_unlock(&finishLoadingMutex):
-				pthread_cond_signal(&finishCrossing),
-				pthread_mutex_unlock(&finishedCrossingMutex);			
+			pos == 2 ? pthread_mutex_unlock(&loadingFinishedM):
+				pthread_cond_signal(&crossingCon),
+				pthread_mutex_unlock(&crossingFinishedM);			
 		} else {
 
 			usleep(HALFSEC);
@@ -195,11 +199,13 @@ void trainStatus(struct train* t, int *is_ready, int loading_time, int pos) {
 void* trainRoutine(void* args) {
   	struct train* train = args;
   	pthread_mutex_lock(&track[train->number]);
+	/*Indicate train has loaded*/
   	trainStatus(train, &train->ready, train->loading_t, 2);
   	pthread_cond_wait(&cross[train->number], &track[train->number]);
   	int trainTime = timer() - timeTrack;
   	printStatus(trainTime, 0, train);
   	pthread_mutex_unlock(&track[train->number]);
+	/*Indicate train has crossed*/
 	trainStatus(train, &train->crossed, (train->crossing_t + trainTime), 1);
 	pthread_exit(0);
 }
@@ -331,7 +337,7 @@ void updateTrains(struct train* priorityTrain) {
 	starvationCount[0] = toupper(priorityTrain->direction);
 	pthread_mutex_lock(&track[priorityTrain->number]);
   	pthread_cond_signal(&cross[priorityTrain->number]);
-  	pthread_mutex_lock(&finishedCrossingMutex);
+  	pthread_mutex_lock(&crossingFinishedM);
   	pthread_mutex_unlock(&track[priorityTrain->number]);
   	
 }
@@ -396,9 +402,9 @@ void joinThreads(void) {
  * Returns:	void
  */
 void destroyTrains(void) {
-	pthread_cond_destroy(&finishCrossing);
-	pthread_mutex_destroy(&finishLoadingMutex);
-	pthread_mutex_destroy(&finishedCrossingMutex);
+	pthread_cond_destroy(&crossingCon);
+	pthread_mutex_destroy(&loadingFinishedM);
+	pthread_mutex_destroy(&crossingFinishedM);
 	for (int i = 0; i < trainCount; i++) {
 		pthread_cond_destroy(&cross[i]);
 		pthread_mutex_destroy(&track[i]);
