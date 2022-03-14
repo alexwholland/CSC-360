@@ -22,7 +22,9 @@ struct train {
   int loading_t;	//Loading time of the train
   int crossing_t;	//Crossing time of the train
   int crossed;		//Indicates if train has crossed the track 0-No 1-Yes
-} trains[MAXTRAINS];
+}; 
+
+struct train trains[MAXTRAINS];
 
 int trainCount = 0;			//Keep track of the # of trains
 int timeTrack = 0;			//Keep track of the time
@@ -46,6 +48,10 @@ void destroyTrains();
 void createEmpty();
 
 int main(int argc, char *argv[]) {
+	if (argc < 2) {
+		perror("No file found");
+		return 1;
+	}
  	extractData(argv[1]);
   	timeTrack = timer();
 	pthread_mutex_init(&finishLoadingMutex, NULL);
@@ -285,8 +291,7 @@ int checkStarvation(char direction, int i) {
  * Returns:	1 if starvation occurs. Else 0.
  */
 int starvationCase(struct train* train, struct train** highest) {    
-	int flag1;
-	int flag2;
+	int flag1, flag2;
   	for (int i = 0; i < STARVATION; i++) {
 		flag1 = checkStarvation(train->direction, i);
 		flag2 = checkStarvation((*highest)->direction, i);	
@@ -400,3 +405,16 @@ void destroyTrains(void) {
 	}
 
 }
+
+/*Debugger*/
+/*void debugger() {
+	for (int i = 0; i < trainCount; i++) {
+		struct train* train = &trains[i];
+	//	printf("Train number: %d", train->number);
+	//	printf("Train ready: %d", train->ready);
+	//	printf("Train diretion: %d", train->direction);
+	//	printf("Train loading time: %d", train->loading_t);
+	//	printf("Has train crossed? %d", train->crossed);
+	//	printf("Raw time: %d", timeTrack);
+	}
+}*/
