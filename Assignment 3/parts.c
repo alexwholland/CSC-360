@@ -12,8 +12,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-#define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
-
 /* Structures implemented from Tutorial 8 slides.
  * "__attribute__((__packed__))" is required to ensure
  * compiler does not  optimize for byte alignment.
@@ -65,16 +63,17 @@ int StartPlusEnd();
 
 /*Part 2*/
 void disklist();
+void printDirectory();
 
 int main(int argc, char* argv[]) {
 	/*Logic implemented from Tutorial 8 slides*/
     	#if defined(PART1)
         	diskinfo(argc, argv);
-  /*  #elif defined(PART2)
+    #elif defined(PART2)
         disklist(argc, argv);
-    #elif defined(PART3)
+/*    #elif defined(PART3)
         diskget(argc, argv);
-    #eliif defined(PART4)
+    #elif defined(PART4)
         diskput(argc, argv);
     #elif defined(PART5)
         diskfix(argc, argv);
@@ -85,8 +84,13 @@ int main(int argc, char* argv[]) {
 }
 
 
-/*Part 1*/
-
+/* Part 1: diskinfo
+ * Purpose: 	Read the file system super block and use the 
+ * 		information to read the FAT.
+ * Parameters: 	int argc - argument count
+ * 		char** argv - argument values
+ * Returns:	void
+ */
 void diskinfo(int argc, char** argv) {
     	if (argc < 2) {
         	printf("No disk image found\n");
@@ -106,39 +110,48 @@ void diskinfo(int argc, char** argv) {
 		exit(1);
 	}
 	
-	struct superblock_t* superB = (struct superblock_t*) data;
+	struct superblock_t* sb = (struct superblock_t*) data;
 	int FATcount[3] = {0};
-	for (int i = calculateStartBlock(superB); i < StartPlusEnd(superB); i += 4) {
+	for (int i = calculateStartBlock(sb); i < StartPlusEnd(sb); i += 4) {
         	int temp = 0;
         	memcpy(&temp, data + i, 4);
 		htonl(temp) == 0 ? FATcount[0]++ : htonl(temp) == 1 ? 
 			FATcount[1]++ : FATcount[2]++;
     	}
 
-    	printBlockInfo(superB, FATcount);
+    	printBlockInfo(sb, FATcount);
 
 	close(fd);
 }
 
-int calculateStartBlock(struct superblock_t* superB) {
-	return ntohl(superB->fat_start_block) * htons(superB->block_size);
+int calculateStartBlock(struct superblock_t* sb) {
+	return ntohl(sb->fat_start_block) * htons(sb->block_size);
 }
 
-int calculateEndBlock(struct superblock_t* superB) {
-	return ntohl(superB->fat_block_count) * htons(superB->block_size);
+int calculateEndBlock(struct superblock_t* sb) {
+	return ntohl(sb->fat_block_count) * htons(sb->block_size);
 }
 
-int StartPlusEnd(struct superblock_t* superB) {
-	return calculateStartBlock(superB) + calculateEndBlock(superB);
+int StartPlusEnd(struct superblock_t* sb) {
+	return calculateStartBlock(sb) + calculateEndBlock(sb);
 }
-void printBlockInfo(struct superblock_t* superB, int FATcount[]) {
+
+/* Purpose: 	Print the formatted output.
+ * Parameters:	struct superblock_t* sb - the superblock
+ * 		int FATcount[] - tracks the blocks in the FAT
+ * 				index 0 - amount of free blocks
+ * 				index 1 - amount of reserved blocks
+ * 				index 2 - amount of allocated blocks
+ * Returns:	void
+ */
+void printBlockInfo(struct superblock_t* sb, int FATcount[]) {
     	printf("Super block information:\n");
-    	printf("Block size: %d\n", htons(superB->block_size));
-  	printf("Block count: %d\n", ntohl(superB->file_system_block_count));
-    	printf("FAT starts: %d\n", ntohl(superB->fat_start_block));
-    	printf("FAT blocks: %d\n", ntohl(superB->fat_block_count));
-    	printf("Root directory start: %d\n", ntohl(superB->root_dir_start_block));
-    	printf("Root directory blocks: %d\n\n", ntohl(superB->root_dir_block_count));
+    	printf("Block size: %d\n", htons(sb->block_size));
+  	printf("Block count: %d\n", ntohl(sb->file_system_block_count));
+    	printf("FAT starts: %d\n", ntohl(sb->fat_start_block));
+    	printf("FAT blocks: %d\n", ntohl(sb->fat_block_count));
+    	printf("Root directory start: %d\n", ntohl(sb->root_dir_start_block));
+    	printf("Root directory blocks: %d\n\n", ntohl(sb->root_dir_block_count));
 	printf("FAT information:\n");
    	printf("Free Blocks: %d\n", FATcount[0]);
     	printf("Reserved Blocks: %d\n", FATcount[1]);
@@ -147,4 +160,85 @@ void printBlockInfo(struct superblock_t* superB, int FATcount[]) {
 }
 
 /*Part 2*/
+void disklist(int argc, char** argv) {
+	char* dirName = argv[2];
+    
+    // Tokenize the input directory
+    	char* tokens[128];
+    	char* directory = argv[2];
+    	int dirs = 0;
+    
+  	if (argc == 3) {
+		char* args = strtok(directory, "/");
+		int i = 0;
+		while (args) {
+			tokens[i++] = args;
+			args = strtok(NULL, "/");
+			dirs++;	
+		}
+		tokens[i] = NULL;
+    }
+    
+    // Open and assemble the disk image
+    int fd = open(argv[1], O_RDWR);
+    struct stat fileStats;
 
+    fstat(fd, &fileStats);
+
+    char* data = mmap(NULL, fileStats.st_size, PROT_WRITE|PROT_READ, MAP_SHARED, fd, 0);
+    struct superblock_t* superBlock = (struct superblock_t*) data;
+
+    int blockSize, rootStart = 0;
+    blockSize = htons(superBlock->block_size);
+    rootStart = ntohl(superBlock->root_dir_start_block) * blockSize;
+
+    struct dir_entry_t* root_block;
+
+    int offSet = rootStart;
+    int curr = 0;
+    if (argc == 3 && strcmp(dirName, "/")) {
+        while(1) {
+            for (int i = offSet; i < offSet + blockSize; i += 64) {
+                root_block = (struct dir_entry_t*) (data+i);
+                const char* name = (const char*)root_block->filename;
+                if (!strcmp(name, tokens[curr])) {
+                    curr++;
+                    offSet = ntohl(root_block->starting_block) * blockSize;
+                    if (curr == dirs || !strcmp(dirName, "/")) {
+                        for (int j = offSet; j < offSet + blockSize; j += 64) {
+                            root_block = (struct dir_entry_t*) (data + j);
+                            if (ntohl(root_block->size) == 0) continue;
+                          	printDirectory(root_block);
+                        }
+                        return;
+                    }
+                    break;
+                }
+            }
+        }
+   }
+    
+    if (argc == 2 || curr == dirs || !strcmp(dirName, "/")) {
+        for (int i = rootStart; i <= rootStart+blockSize; i += 64) {
+            root_block = (struct dir_entry_t*) (data+i);
+            if (ntohl(root_block->size) == 0) continue;
+    		printDirectory(root_block);
+        }
+    }    
+}
+
+
+
+
+void printDirectory(struct dir_entry_t* root_block) {
+            printf("%s %10d %30s %4d/%02d/%02d %02d:%02d:%02d\n",
+		root_block->status == 5 ? "D" : "F",  
+		ntohl(root_block->size),
+		root_block->filename,	    
+		htons(root_block->modify_time.year),
+		root_block->modify_time.month,
+		root_block->modify_time.day,
+		root_block->modify_time.hour,
+		root_block->modify_time.minute,
+		root_block->modify_time.second); 
+}
