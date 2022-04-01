@@ -159,6 +159,10 @@ int StartPlusEnd(struct superblock_t* sb) {
 	return calculateStartBlock(sb) + calculateEndBlock(sb);
 }
 
+int rootStartBlock(struct superblock_t* sb) {
+	return ntohl(sb->root_dir_start_block) * htons(sb->block_size);
+}
+
 /* Purpose: 	Print the formatted output.
  * Parameters:	struct superblock_t* sb - the superblock
  * 		int FATcount[] - tracks the blocks in the FAT
@@ -410,23 +414,54 @@ int put(int root_block, int block_size, void* address, struct stat buf, char* fi
    return fat_dir_location;
 }
 
-void diskput(int argc, char *argv[], char* address, struct stat buf) {
-	checkArguments(argc, 4);
+
+void fullDirectory(struct superblock_t* sb, int fat_dir_location, char* address) {
+	int end = 0xFFFFFFFF;
+	for (int i = fat_dir_location; i < StartPlusEnd(sb); i += 4) {
+        	int curr = -1;
+        	memcpy(&curr, address + i, 4);
+        	curr = htonl(curr);
+        	if (curr == 0) {
+           		int new = htonl((i - calculateStartBlock(sb))/4);
+           		memcpy(address + fat_dir_location, &new, 4);
+
+           		memcpy(address + i, &end, 4);
+
+           		int root_blocks = ntohl(ntohl(sb->root_dir_block_count) + 1);
+           		memcpy(address+26, &root_blocks, 4);
+           		break;
+        	}
+    	}
+}
+
+/*
+putFile(struct superblock_t* sb, char* address, int blocksize) {
+	
+}
+*/
+
+void diskput(int argc, char *argv[], char* address, struct stat buffer) {
+    	checkArguments(argc, 4);
 	char* tokens[128];
 	stripDirectory(argv, 3, tokens);
-	
- 
+
+    char *file_name = argv[2];
+    struct stat buf;
+    int f = open(file_name, O_RDONLY);
+    if (fstat(f, &buf) < 0) {
+        printf("File not found.\n");
+        return;
+    }
+
     int file_size = buf.st_size;
-    FILE *fp = fopen(argv[2], "rb");
+
+    FILE* fp = fopen(file_name, "rb");
+
+
     struct superblock_t* sb;
     sb = (struct superblock_t*) address;
 
-    int block_size = htons(sb->block_size);
-   	int fat_start_block = calculateStartBlock(sb);
-    //int fat_start_block = ntohl(sb->fat_start_block) * block_size;
-    int fat_block_count = ntohl(sb->fat_block_count);
-    int fat_end_block = fat_start_block + fat_block_count * block_size;
-    int root_dir_start_block = ntohl(sb->root_dir_start_block) * block_size;
+    	int block_size = htons(sb->block_size);
 
     // going through FAT
     int needed_blocks = file_size / block_size;
@@ -438,33 +473,26 @@ void diskput(int argc, char *argv[], char* address, struct stat buf) {
     int end = 0xFFFFFFFF;
     int mem_location = 0, last_FAT = 0, starting_block = 0;
     char file_buffer[512];
-    int i;
-    for (i = fat_start_block; i < fat_end_block; i += 4) {
+    for (int i = calculateStartBlock(sb); i < StartPlusEnd(sb); i += 4) {
         int curr = -1;
         memcpy(&curr, address + i, 4);
         curr = htonl(curr);
         // found a free block
         if (curr == 0) {
            if (blocks_used == 0) {
-               // on first iteration, don't update FAT but record our location
-               starting_block = (i-fat_start_block)/4;
+               starting_block = (i-calculateStartBlock(sb))/4;
                last_FAT = i;
                blocks_used++;
 
                fread(file_buffer, block_size, 1, fp);
-               //printf("Write memory to %x\n", starting_block*block_size)
                memcpy(address+(starting_block*block_size), &file_buffer, block_size);
-
                continue;
            }
-           mem_location = (i-fat_start_block)/4;
-
-           // read in and write information
+           mem_location = (i-calculateStartBlock(sb))/4;
            fread(file_buffer, block_size, 1, fp);
            memcpy(address+(mem_location*block_size), &file_buffer, block_size);
 
            int loc = htonl(mem_location);
-           // copy current location to the last FAT entry, creating the linked list
            memcpy(address+last_FAT, &loc, 4);
            last_FAT = i;
            blocks_used++;
@@ -478,39 +506,17 @@ void diskput(int argc, char *argv[], char* address, struct stat buf) {
 
 
     // go to root dir to find open spot to add entry
-    int root_block = root_dir_start_block;
     int fat_dir_location = 0;
-
-    // int root_block, int block_size, void* address, struct stat buf, char* file_placement, int file_size, int needed_blocks, int starting_block, int fat_start_block, int fat_dir_location)
-    fat_dir_location = put(root_block, block_size, address, buf, tokens[0], file_size, needed_blocks, starting_block, fat_start_block, fat_dir_location);
+    fat_dir_location = put(rootStartBlock(sb), block_size, address, buf, tokens[0], file_size, needed_blocks, starting_block, calculateStartBlock(sb), fat_dir_location);
 
     // on successful retrun, exit
-    if (!fat_dir_location) { return; }
+    	if (!fat_dir_location) { 
+		return; 
+	}
 
+	fullDirectory(sb, fat_dir_location, address);
+    
+    	put(rootStartBlock(sb), block_size, address, buf, tokens[0], file_size, needed_blocks, starting_block, calculateStartBlock(sb), fat_dir_location);
 
-    // if we get here, then the root directory must be full and therefor
-    //  we need to allocate more space
-    for (i = fat_dir_location; i < fat_end_block; i += 4) {
-        int curr = -1;
-        memcpy(&curr, address + i, 4);
-        curr = htonl(curr);
-        // found an empty location in the FAT
-        if (curr == 0) {
-           // write new location to old FAT entry
-           int new = htonl((i - fat_start_block)/4);
-           memcpy(address + fat_dir_location, &new, 4);
-
-           // set new FAT location to 0xFFFFFFFF
-           memcpy(address + i, &end, 4);
-
-           int root_blocks = ntohl(sb->root_dir_block_count) + 1;
-           root_blocks = ntohl(root_blocks);
-           memcpy(address+26, &root_blocks, 4);
-           break;
-        }
-    }
-    put(root_block, block_size, address, buf, tokens[0], file_size, needed_blocks, starting_block, fat_start_block, fat_dir_location);
-
-    return;
+    	return;
 }
-
