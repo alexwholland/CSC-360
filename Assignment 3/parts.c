@@ -342,48 +342,37 @@ void diskget(int argc, char* argv[], char* addr, struct stat buffer) {
     return;
 }
 
+void date(void* address, int i, int k, char buff[]) {
+	sscanf(buff, "%d", &k);
+	memcpy(address + i, &k, 1);
+	memcpy(address + (i-7), &k, 1);
+}
+
 
 void updateTime(void* address, int i, struct stat buf) {
-			struct tm *tm;
             			char buff[10];
-            			tm = localtime(&buf.st_mtime);
             			int k;
 
-            			// Create time and modify time the same
-			      	strftime(buff, sizeof(buff), "%Y", tm);
+			      	strftime(buff, sizeof(buff), "%Y", localtime(&buf.st_mtime));
             			sscanf(buff, "%d", &k);
             			k = htons(k);
             			memcpy(address+i+20, &k, 2);
             			memcpy(address+i+13, &k, 2);
 
-            			strftime(buff, sizeof(buff), "%m", tm);
-            			sscanf(buff, "%d", &k);
-            			memcpy(address+i+22, &k, 1);
-            			memcpy(address+i+15, &k, 1);
+            			strftime(buff, sizeof(buff), "%m", localtime(&buf.st_mtime));
+				date(address, i+22, k, buff);
 
-            			strftime(buff, sizeof(buff), "%d", tm);
-            			sscanf(buff, "%d", &k);
-            			memcpy(address+i+23, &k, 1);
-            			memcpy(address+i+16, &k, 1);
+            			strftime(buff, sizeof(buff), "%d", localtime(&buf.st_mtime));
+            			date(address, i+23, k, buff);
 
-            			strftime(buff, sizeof(buff), "%H", tm);
-            			sscanf(buff, "%d", &k);
-            			memcpy(address+i+24, &k, 1);
-            			memcpy(address+i+17, &k, 1);
+            			strftime(buff, sizeof(buff), "%H", localtime(&buf.st_mtime));
+            			date(address, i+24, k, buff);
 
-            			strftime(buff, sizeof(buff), "%M", tm);
+            			strftime(buff, sizeof(buff), "%M", localtime(&buf.st_mtime));
+            			date(address, i+25, k, buff);
 
-            			sscanf(buff, "%d", &k);
-            			memcpy(address+i+25, &k, 1);
-			        memcpy(address+i+18, &k, 1);
-
-		            	strftime(buff, sizeof(buff), "%S", tm);
-	            		sscanf(buff, "%d", &k);
-	            		memcpy(address+i+26, &k, 1);
-	            		memcpy(address+i+19, &k, 1);
-	 
-
-
+		            	strftime(buff, sizeof(buff), "%S", localtime(&buf.st_mtime));
+	            		date(address, i+26, k, buff);
 }
 
 int put(int root_block, int block_size, void* address, struct stat buf, char* file_placement, int file_size, int needed_blocks, int starting_block, int fat_start_block, int fat_dir_location) {
