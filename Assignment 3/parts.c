@@ -275,24 +275,11 @@ int copyBlockContents(int block_size, int num_blocks, void* addr, int current_bl
       	}
 	return current_block;
 }
-/*
-int updateStatus(int root_block, int root_start, int block_size, void* addr, int fat_start) {
-//	int root_block = root_start * block_size;
-       	memcpy(&root_block, addr + ((root_block/block_size)*4 + (fat_start * block_size)), 4);	
-	root_block = htonl(root_block);
-	if (root_block == -1) {
-		return 0;
-	}
-//	root_block = root_block * block_size;
-	return 1;
-}*/
-
 
 void fileNotFound(void* addr, struct stat buffer) {
 	printf("File not found.\n");
 	munmap(addr, buffer.st_size);
 }
-
 
 
 int getHtonsSize(int i, void* addr, int size) {
@@ -323,6 +310,20 @@ void fileFound(void* addr, int i, FILE* fp, int block_size, int fat_start, int c
         memcpy(&curr, addr + fat_address, 4);
 }
 
+
+int copyInfo(int* root_block, int block_size, int fat_start_block, void* addr, int mode) {
+	if (mode == 1) {
+      		memcpy(&root_block, addr + ((*root_block/block_size)*4) 
+				+ (fat_start_block*block_size), 4);
+	} 
+      *root_block = htonl(*root_block);
+      if (*root_block == -1){ 
+	      return 0; 
+      }
+      *root_block = *root_block * block_size;
+      return 1;
+
+}
 
 /*Part 3*/
 
@@ -356,15 +357,9 @@ void diskget(int argc, char* argv[], char* addr, struct stat buffer) {
                			}
            		}
         	}
-	
-        	memcpy(&root_block, addr+((root_block/block_size)*4 + (fat_start * block_size)), 4);
-        	root_block = htonl(root_block);
-        	if (root_block == -1){ 
-			break; 
-		}
-
-		root_block = root_block * block_size;
-	
+		if (copyInfo(&root_block, block_size, fat_start, addr, 1) == 0) {
+			break;
+		}	
     	}
 	fileNotFound(addr, buffer);
     	return;
@@ -409,13 +404,17 @@ void getSize(int block, int i, void* addr, int size) {
 }
 
 
+void newBlock(void* addr, int i, int size) {
+	int hex = 0xFFFFFFFF;
+	memcpy(addr+i, &hex, size);
+}
+
+
 int put(int root_block, int block_size, void* addr, struct stat buf, char* file_placement, int file_size, int needed_blocks, int starting_block, int fat_start_block, int fat_dir_location) {
-   	int stat = 3;
-  	int i;
-   	int endf = 0xFFFFFFFF;
+	int stat = 3;
    	int endff = 0xFFFF;
    	while(1){
-      		for (i = root_block; i < root_block + block_size; i += 64) {
+      		for (int i = root_block; i < root_block + block_size; i += 64) {
          		int curr = 0;
          		memcpy(&curr, addr + i, 1);
          		if (curr == 0){
@@ -429,41 +428,33 @@ int put(int root_block, int block_size, void* addr, struct stat buf, char* file_
             		    
 		    		strncpy(addr+i+27, file_placement, 31);
 	
-	            		memcpy(addr+i+58, &endf, 4);
+				newBlock(addr, i+58, 4);
 	            		memcpy(addr+i+62, &endff, 2);
 
             			return 0;
           	}
       }
-      fat_dir_location = (root_block/block_size)*4 + (fat_start_block);
-      memcpy(&root_block, addr + fat_dir_location, 4);
-      root_block = htonl(root_block);
-      if (root_block == -1){ 
-	      break; 
-      }
-      root_block = root_block * block_size;
+	fat_dir_location = (root_block/block_size)*4 + (fat_start_block);
+	memcpy(&root_block, addr + fat_dir_location, 4);
+	if (copyInfo(&root_block, block_size, fat_dir_location, addr, 0) == 0) {
+		break;
+	}
    }
-
-   // return nonzero value if no entry was added, which is the case where the
-   // directory is full
    return fat_dir_location;
 }
 
 
-void fullDirectory(struct superblock_t* sb, int fat_dir_location, char* address) {
-	int end = 0xFFFFFFFF;
+void fullDirectory(struct superblock_t* sb, int fat_dir_location, char* addr) {
 	for (int i = fat_dir_location; i < StartPlusEnd(sb); i += 4) {
         	int curr = -1;
-        	memcpy(&curr, address + i, 4);
+        	memcpy(&curr, addr + i, 4);
         	curr = htonl(curr);
         	if (curr == 0) {
            		int new = htonl(newLocation(sb, i));
-           		memcpy(address + fat_dir_location, &new, 4);
-
-           		memcpy(address + i, &end, 4);
-
+           		memcpy(addr + fat_dir_location, &new, 4);
+			newBlock(addr, i, 4);
            		int root_blocks = ntohl(ntohl(sb->root_dir_block_count) + 1);
-           		memcpy(address+26, &root_blocks, 4);
+           		memcpy(addr+26, &root_blocks, 4);
            		break;
         	}
     	}
@@ -494,19 +485,9 @@ void addFile(int root_block, int block_size, void* address, struct stat buf, cha
 	exit(EXIT_FAILURE);
 }
 
-void diskput(int argc, char *argv[], char* address, struct stat buf) {
-    	checkArguments(argc, 4);
-	char* tokens[128];
-	stripDirectory(argv, 3, tokens);
-    	FILE* fp = fopen(argv[2], "rb");
-	if (fp == NULL) {
-		return;
-	}
+int testing(struct superblock_t* sb, void* address, FILE* fp, struct stat buf) {
 
-    	struct superblock_t* sb = (struct superblock_t*) address;
-
-    int blocks_used = 0;
-    int end = 0xFFFFFFFF;
+ int blocks_used = 0;
     int mem_location = 0, last_FAT = 0, starting_block = 0;
     char file_buffer[512];
     for (int i = calculateStartBlock(sb); i < StartPlusEnd(sb); i += 4) {
@@ -533,11 +514,25 @@ void diskput(int argc, char *argv[], char* address, struct stat buf) {
            blocks_used++;
 
            if (blocks_used == allocateBlocks(buf.st_size, htons(sb->block_size))){
-               memcpy(address+i, &end, 4);
+		newBlock(address, i, 4);
                break;
            }
         }
     }
-	addFile(rootStartBlock(sb), htons(sb->block_size), address, buf, tokens[0], buf.st_size, allocateBlocks(buf.st_size, htons(sb->block_size)), starting_block, calculateStartBlock(sb), sb, tokens);
+ return starting_block;	
+}
+
+void diskput(int argc, char *argv[], char* address, struct stat buf) {
+    	checkArguments(argc, 4);
+	char* tokens[128];
+	stripDirectory(argv, 3, tokens);
+    	FILE* fp = fopen(argv[2], "rb");
+	if (fp == NULL) {
+		return;
+	}
+    	struct superblock_t* sb = (struct superblock_t*) address;
+	addFile(rootStartBlock(sb), htons(sb->block_size), address, buf, tokens[0], 
+			buf.st_size, allocateBlocks(buf.st_size, htons(sb->block_size)), 
+			testing(sb, address, fp, buf), calculateStartBlock(sb), sb, tokens);
     	return;
 }
