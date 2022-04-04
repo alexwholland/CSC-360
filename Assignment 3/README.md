@@ -19,12 +19,25 @@ Displays the contents of the root directory with the following content:
 - File creation date in `<year/month/day> <hour:min:sec>` format
 
 ### Part III: diskget.c
-Copies a file from the file system to the current local directory in Linux. Only works for the root directory.
+Copies a file from the file system to the current local directory in Linux. Only works for the root directory. The following design is implemented:
+1) Convert the given filename to upper case then search the directory entries in the foot folder for the filename.
+2) If filname found -> get the file size and first logical cluster.
+3) Use FAT entries to copy.
+4) If the last cluster of file and file size value is reached, stop the copy.
+5) Print "File not found." if the file is not in the root directory, then exit.
 
 ### Part IV: diskput.c
-Copies a file from the current local directory in Linux into the file system. Only works for the root directory.
+Copies a file from the current local directory in Linux into the file system. Only works for the root directory. the following design is implemented:
+1) Check if the file is within the current local Linux directory.
+2) Check if the specified directory exits within the FAT image.
+3) check the available space
+4) Find unused sectors in the disk.
+5) Copy the file to the unused sectors.
+6) Update the file size of directory entry and first logical cluster number.
+7) Update FAT entries.
 
 ### Part V: diskfix.c (Not completed)
+Iterate through the disk image according to the file system specification and find inconsistent information and fix the issues.
 
 ## Run the program
 Compile by running `make`
@@ -36,4 +49,5 @@ Run any of the commands one-by-one: </br>
 `./diskput test.img foo.txt /foo2.txt` </br>
 
 ### References: </br>
-https://stackoverflow.com/questions/258091/when-should-i-use-mmap-for-file-access
+https://stackoverflow.com/questions/258091/when-should-i-use-mmap-for-file-access </br>
+Tutorial 8,9,10 slides
