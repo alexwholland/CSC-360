@@ -12,6 +12,8 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
+#define SECTORSIZE 512
+
 /* Structures implemented from Tutorial 8 slides.
  * "__attribute__((__packed__))" is required to ensure
  * compiler does not  optimize for byte alignment.
@@ -64,12 +66,12 @@ int StartPlusEnd();
 /*Part 2*/
 void disklist();
 void printDirectory();
-
+void fileNotFound();
 void diskget();
 void checkArguments();
 
+/*Part 3*/
 void diskput();
-void fileNotFound();
 
 int main(int argc, char* argv[]) {
 	int fd = open(argv[1], O_RDWR);
@@ -115,7 +117,12 @@ int main(int argc, char* argv[]) {
         return 0;
 }
 
-
+/* Purpose: 	Strip the forward slash '/' from the input
+ * Parameters: 	char* argv[] - the input
+ *		int pos - the argument number
+ *		char* tokens[] - tokenized arguments
+ * Returns:	void 
+ */
 void stripDirectory(char* argv[], int pos, char* tokens[]) {
 	char* args = strtok(argv[pos], "/");
 	int i = 0;
@@ -126,6 +133,12 @@ void stripDirectory(char* argv[], int pos, char* tokens[]) {
 	tokens[i] = NULL;
 }
 
+
+/* Purpose:	Checks if the correct number of arguments were used
+ * Parameters: 	int argc - the provided number of arguments
+ * 		int argCount - the expected number of arguments
+ * Returns: 	void
+ */
 void checkArguments(int argc, int argCount) {
 	if (argc != argCount) {
 		printf("Error: %d arguments were used, but %d were expected\n", argc, argCount);
@@ -155,6 +168,8 @@ void diskinfo(int argc, char** argv, char* addr) {
     	printBlockInfo(sb, FATcount);
 }
 
+
+/*Calculate the blocks*/
 int calculateStartBlock(struct superblock_t* sb) {
 	return ntohl(sb->fat_start_block) * htons(sb->block_size);
 }
@@ -171,6 +186,7 @@ int rootStartBlock(struct superblock_t* sb) {
 	return ntohl(sb->root_dir_start_block) * htons(sb->block_size);
 }
 
+/*Calculate the location/addresses*/
 int newLocation(struct superblock_t* sb, int i) {
 	return ((i - calculateStartBlock(sb)) / 4);
 }
@@ -203,7 +219,13 @@ void printBlockInfo(struct superblock_t* sb, int FATcount[]) {
 }
 
 /*Part 2*/
-void disklist(int argc, char** argv, char* addr) {
+
+/* Purpose: 	Display the cont of the directory
+ * Parameters:	int argc - # of arguments
+ * 		int** argv - the inputted arguments
+ * Returns:	void
+ */
+void disklist(int argc, char* argv[], char* addr) {
 	char* dirName = argv[2];
     	char* tokens[128];
     	int dirs = 0;
@@ -214,30 +236,26 @@ void disklist(int argc, char** argv, char* addr) {
 		dirs++;
 	}
 
-
     	struct superblock_t* sb = (struct superblock_t*) addr;
-
 	int rootStart = rootStartBlock(sb);
-
-
     	struct dir_entry_t* root_block;
-
-    	int curr = 0;
+    	int count = 0;
     	if (argc == 3 && strcmp(dirName, "/")) {
 		for (int i = 0; i < dirs; i++) {
             		for (int j = rootStart; j < rootStart + htons(sb->block_size); j += 64) {
              			root_block = (struct dir_entry_t*) (addr+j);
                 		const char* name = (const char*)root_block->filename;
-                		if (!strcmp(name, tokens[curr])) {
-                    			curr++;
-                    			rootStart = ntohl(root_block->starting_block) * htons(sb->block_size);
+                		if (!strcmp(name, tokens[count])) {
+                    			count++;
+                    			rootStart = ntohl(root_block->starting_block) 
+						* htons(sb->block_size);
                                 	break;
                 		}
      			}	
 		}
    	}
     
-    	if (argc == 2 || curr == dirs || !strcmp(dirName, "/")) {
+    	if (argc == 2 || count == dirs || !strcmp(dirName, "/")) {
         	for (int i = rootStart; i <= rootStart + htons(sb->block_size); i += 64) {
             		root_block = (struct dir_entry_t*) (addr+i);
             		if (ntohl(root_block->size) == 0) {
@@ -249,6 +267,10 @@ void disklist(int argc, char** argv, char* addr) {
 }
 
 
+/* Purpose: 	Print the status of the directory
+ * Parameters: 	struct dir_entry_t* root_block - the information
+ * Returns:	void
+ */
 void printDirectory(struct dir_entry_t* root_block) {
             printf("%s %10d %30s %4d/%02d/%02d %02d:%02d:%02d\n",
 		root_block->status == 5 ? "D" : "F",  
@@ -263,7 +285,10 @@ void printDirectory(struct dir_entry_t* root_block) {
 }
 
 
-
+/* Purpose: Copy the block contents to a new location
+ * Parameters:
+ * Returns int current_block
+ */
 int copyBlockContents(int block_size, int num_blocks, void* addr, int current_block, FILE* fp, int fat_start, int curr) {
 	int fat_address = 0;
 	for (int i = 0; i < num_blocks-1; i++) {
@@ -276,12 +301,14 @@ int copyBlockContents(int block_size, int num_blocks, void* addr, int current_bl
 	return current_block;
 }
 
+
+/*Indicate that the file has not been found and deletes the mappings*/
 void fileNotFound(void* addr, struct stat buffer) {
 	printf("File not found.\n");
 	munmap(addr, buffer.st_size);
 }
 
-
+/**/
 int getHtonsSize(int i, void* addr, int size) {
 	int block = 0;
 	memcpy(&block, addr + i, size);
@@ -294,6 +321,11 @@ int getHtonlSize(int i, void* addr, int size) {
 	return htonl(block);
 }
 
+
+/* Purpose: 
+ *
+ *
+ */
 void fileFound(void* addr, int i, FILE* fp, int block_size, int fat_start, int curr) {
   	int fat_address = 0;
 	int num_blocks = getHtonlSize(i+5, addr, 4);
@@ -332,17 +364,13 @@ void diskget(int argc, char* argv[], char* addr, struct stat buffer) {
 	char* tokens[128];
   	stripDirectory(argv, 2, tokens);
 
-    	int block_size = getHtonsSize(8, addr, 2);
-	int fat_start = getHtonsSize(16, addr, 2);
-	int root_start = getHtonsSize(24, addr, 2);
-
-	int root_block = root_start * block_size;
+	int root_block = getHtonsSize(24, addr, 2) * getHtonsSize(8, addr, 2);
 
     	while(1){
-        	for (int i = root_start * block_size; i < (root_start*block_size) + block_size; i += 64) {
-           		int curr = 0;
-           		memcpy(&curr, addr + i, 1);
-           		if (curr == 3) {
+        	for (int i = root_block; i < root_block + getHtonsSize(8, addr, 2); i += 64) {
+           		int count = 0;
+           		memcpy(&count, addr + i, 1);
+           		if (count == 3) {
                			char name[31];
                			memcpy(&name, addr + i + 27, 31);
                			if (!strcmp(name, tokens[0])) {
@@ -350,14 +378,15 @@ void diskget(int argc, char* argv[], char* addr, struct stat buffer) {
 					if (fp == NULL) {
 						return;
 					}
-					fileFound(addr, i, fp, block_size, fat_start, curr);
+					fileFound(addr, i, fp, getHtonsSize(8, addr, 2), 
+							getHtonsSize(16, addr, 2), count);
                    			munmap(addr, buffer.st_size);
                    			fclose(fp);
                    			return;
                			}
            		}
         	}
-		if (copyInfo(&root_block, block_size, fat_start, addr, 1) == 0) {
+		if (copyInfo(&root_block, getHtonsSize(8, addr, 2), getHtonsSize(16, addr, 2), addr, 1) == 0) {
 			break;
 		}	
     	}
@@ -373,29 +402,29 @@ void date(void* address, int i, int k, char buff[]) {
 
 
 void updateTime(void* address, int i, struct stat buf) {
-            			char buff[10];
+            			char dSize[10];
             			int k;
 
-			      	strftime(buff, sizeof(buff), "%Y", localtime(&buf.st_mtime));
-            			sscanf(buff, "%d", &k);
+			      	strftime(dSize, sizeof(dSize), "%Y", localtime(&buf.st_mtime));
+            			sscanf(dSize, "%d", &k);
             			k = htons(k);
             			memcpy(address+i+20, &k, 2);
             			memcpy(address+i+13, &k, 2);
 
-            			strftime(buff, sizeof(buff), "%m", localtime(&buf.st_mtime));
-				date(address, i+22, k, buff);
+            			strftime(dSize, sizeof(dSize), "%m", localtime(&buf.st_mtime));
+				date(address, i+22, k, dSize);
 
-            			strftime(buff, sizeof(buff), "%d", localtime(&buf.st_mtime));
-            			date(address, i+23, k, buff);
+            			strftime(dSize, sizeof(dSize), "%d", localtime(&buf.st_mtime));
+            			date(address, i+23, k, dSize);
 
-            			strftime(buff, sizeof(buff), "%H", localtime(&buf.st_mtime));
-            			date(address, i+24, k, buff);
+            			strftime(dSize, sizeof(dSize), "%H", localtime(&buf.st_mtime));
+            			date(address, i+24, k, dSize);
 
-            			strftime(buff, sizeof(buff), "%M", localtime(&buf.st_mtime));
-            			date(address, i+25, k, buff);
+            			strftime(dSize, sizeof(dSize), "%M", localtime(&buf.st_mtime));
+            			date(address, i+25, k, dSize);
 
-		            	strftime(buff, sizeof(buff), "%S", localtime(&buf.st_mtime));
-	            		date(address, i+26, k, buff);
+		            	strftime(dSize, sizeof(dSize), "%S", localtime(&buf.st_mtime));
+	            		date(address, i+26, k, dSize);
 }
 
 void getSize(int block, int i, void* addr, int size) {
@@ -406,52 +435,52 @@ void getSize(int block, int i, void* addr, int size) {
 
 void newBlock(void* addr, int i, int size) {
 	int hex = 0xFFFFFFFF;
-	memcpy(addr+i, &hex, size);
+	memcpy(addr + i, &hex, size);
 }
 
 
-int put(int root_block, int block_size, void* addr, struct stat buf, char* file_placement, int file_size, int needed_blocks, int starting_block, int fat_start_block, int fat_dir_location) {
-	int stat = 3;
-   	int endff = 0xFFFF;
+void endBlock(void* addr, int i, int size) {
+	int hex = 0xFFFF;
+	memcpy(addr + i, &hex, size);
+}	
+
+int putInfo(int block, int bSize, void* addr, struct stat buf, char* fPos, int fSize, int bCount, int firstB, int firstFATB, int locFAT) {
+	int jump = 3;
    	while(1){
-      		for (int i = root_block; i < root_block + block_size; i += 64) {
-         		int curr = 0;
-         		memcpy(&curr, addr + i, 1);
-         		if (curr == 0){
-            			memcpy(addr+i, &stat, 1);
-
-				getSize(starting_block, i+1, addr, 4);
-				getSize(needed_blocks, i+5, addr, 4);
-				getSize(file_size, i+9, addr, 4);
-
+      		for (int i = block; i < block + bSize; i += 64) {
+         		int count = 0;
+         		memcpy(&count, addr + i, 1);
+         		if (count == 0){
+            			memcpy(addr+i, &jump, 1);
+				getSize(firstB, i+1, addr, 4);
+				getSize(bCount, i+5, addr, 4);
+				getSize(fSize, i+9, addr, 4);
 				updateTime(addr, i, buf);
-            		    
-		    		strncpy(addr+i+27, file_placement, 31);
-	
+		    		strncpy(addr+i+27, fPos, 31);
 				newBlock(addr, i+58, 4);
-	            		memcpy(addr+i+62, &endff, 2);
+				endBlock(addr, i + 62, 2);
 
             			return 0;
           	}
       }
-	fat_dir_location = (root_block/block_size)*4 + (fat_start_block);
-	memcpy(&root_block, addr + fat_dir_location, 4);
-	if (copyInfo(&root_block, block_size, fat_dir_location, addr, 0) == 0) {
+	locFAT = (block/bSize)*4 + (firstFATB);
+	memcpy(&block, addr + locFAT, 4);
+	if (copyInfo(&block, bSize, locFAT, addr, 0) == 0) {
 		break;
 	}
    }
-   return fat_dir_location;
+   return locFAT;
 }
 
 
-void fullDirectory(struct superblock_t* sb, int fat_dir_location, char* addr) {
-	for (int i = fat_dir_location; i < StartPlusEnd(sb); i += 4) {
-        	int curr = -1;
-        	memcpy(&curr, addr + i, 4);
-        	curr = htonl(curr);
-        	if (curr == 0) {
+void fullDirectory(struct superblock_t* sb, int locFAT, char* addr) {
+	for (int i = locFAT; i < StartPlusEnd(sb); i += 4) {
+        	int count = -1;
+        	memcpy(&count, addr + i, 4);
+        	count = htonl(count);
+        	if (count == 0) {
            		int new = htonl(newLocation(sb, i));
-           		memcpy(addr + fat_dir_location, &new, 4);
+           		memcpy(addr + locFAT, &new, 4);
 			newBlock(addr, i, 4);
            		int root_blocks = ntohl(ntohl(sb->root_dir_block_count) + 1);
            		memcpy(addr+26, &root_blocks, 4);
@@ -475,7 +504,7 @@ void addFile(int root_block, int block_size, void* address, struct stat buf, cha
 			fullDirectory(sb, newSpot, address);
 		}
 	
-		if (!put(rootStartBlock(sb), htons(sb->block_size), address, buf, tokens[0], 
+		if (!putInfo(rootStartBlock(sb), htons(sb->block_size), address, buf, tokens[0], 
 				buf.st_size, allocateBlocks(buf.st_size, htons(sb->block_size)), 
 				starting_block, calculateStartBlock(sb), newSpot)) {
 			return;	
@@ -485,41 +514,41 @@ void addFile(int root_block, int block_size, void* address, struct stat buf, cha
 	exit(EXIT_FAILURE);
 }
 
-int testing(struct superblock_t* sb, void* address, FILE* fp, struct stat buf) {
+int findPutLocation(struct superblock_t* sb, void* address, FILE* fp, struct stat buf) {
 
- int blocks_used = 0;
-    int mem_location = 0, last_FAT = 0, starting_block = 0;
-    char file_buffer[512];
-    for (int i = calculateStartBlock(sb); i < StartPlusEnd(sb); i += 4) {
-        int curr = -1;
-        memcpy(&curr, address + i, 4);
-        curr = htonl(curr);
-        if (curr == 0) {
-           if (blocks_used == 0) {
-               starting_block = newLocation(sb, i);
-               last_FAT = i;
-               blocks_used++;
+	int blockCount = 0;
+    	int last_FAT = 0, starting_block = 0;
+    	char buffer[SECTORSIZE];
+    	for (int i = calculateStartBlock(sb); i < StartPlusEnd(sb); i += 4) {
+        	int count = -1;
+        	memcpy(&count, address + i, 4);
+        	count = htonl(count);
+        	if (count == 0) {
+           		if (blockCount == 0) {
+               			starting_block = newLocation(sb, i);
+               			last_FAT = i;
+               			blockCount++;
+               			fread(buffer, htons(sb->block_size), 1, fp);
+               			memcpy(address+(starting_block*htons(sb->block_size)), 
+						&buffer, htons(sb->block_size));
+               			continue;
+           		}
+           		int mem_location = newLocation(sb, i);
+           		fread(buffer, htons(sb->block_size), 1, fp);
+           		memcpy(address+(mem_location*htons(sb->block_size)), 
+					&buffer, htons(sb->block_size));
 
-               fread(file_buffer, htons(sb->block_size), 1, fp);
-               memcpy(address+(starting_block*htons(sb->block_size)), &file_buffer, htons(sb->block_size));
-               continue;
-           }
-           mem_location = newLocation(sb, i);
-           fread(file_buffer, htons(sb->block_size), 1, fp);
-           memcpy(address+(mem_location*htons(sb->block_size)), &file_buffer, htons(sb->block_size));
-
-           int loc = htonl(mem_location);
-           memcpy(address+last_FAT, &loc, 4);
-           last_FAT = i;
-           blocks_used++;
-
-           if (blocks_used == allocateBlocks(buf.st_size, htons(sb->block_size))){
-		newBlock(address, i, 4);
-               break;
-           }
-        }
-    }
- return starting_block;	
+           		int loc = htonl(mem_location);
+           		memcpy(address+last_FAT, &loc, 4);
+           		last_FAT = i;
+           		blockCount++;
+           		if (blockCount == allocateBlocks(buf.st_size, htons(sb->block_size))){
+				newBlock(address, i, 4);
+               			break;
+           		}
+        	}
+    	}
+ 	return starting_block;	
 }
 
 void diskput(int argc, char *argv[], char* address, struct stat buf) {
@@ -533,6 +562,6 @@ void diskput(int argc, char *argv[], char* address, struct stat buf) {
     	struct superblock_t* sb = (struct superblock_t*) address;
 	addFile(rootStartBlock(sb), htons(sb->block_size), address, buf, tokens[0], 
 			buf.st_size, allocateBlocks(buf.st_size, htons(sb->block_size)), 
-			testing(sb, address, fp, buf), calculateStartBlock(sb), sb, tokens);
+			findPutLocation(sb, address, fp, buf), calculateStartBlock(sb), sb, tokens);
     	return;
 }
