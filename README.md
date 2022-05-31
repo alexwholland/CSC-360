@@ -1,4 +1,4 @@
-# CSC-360: Introduction to Operating System
+# CSC-360: Introduction to Operating Systems
 
 ## Course Overview
 To understand how a set of computing resources can be shared safely, efficiently, and effectively among many users, including the major concepts 
